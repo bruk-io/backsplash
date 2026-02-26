@@ -15,6 +15,14 @@ export interface TileSelectDetail {
   gid: number;
 }
 
+/** Detail payload for the bs-stamp-select event. */
+export interface StampSelectDetail {
+  topLeftGid: number;
+  width: number;
+  height: number;
+  tilesetColumns: number;
+}
+
 @customElement('bs-tileset-panel')
 export class BsTilesetPanel extends BaseElement {
   static override styles = [
@@ -49,6 +57,11 @@ export class BsTilesetPanel extends BaseElement {
       .tile.selected {
         border-color: var(--bh-color-primary);
       }
+
+      .tile.in-stamp {
+        border-color: var(--bh-color-primary);
+        opacity: 0.85;
+      }
     `,
   ];
 
@@ -61,9 +74,18 @@ export class BsTilesetPanel extends BaseElement {
   /** Blob URL created from an ImageBitmap for use in CSS background-image. */
   @state() private _imageUrl = '';
 
+  /** GIDs in the current stamp selection (for highlight rendering). */
+  @state() private _stampGids = new Set<number>();
+
   /** Cached image dimensions for background-size. */
   private _imageWidth = 0;
   private _imageHeight = 0;
+
+  /** GID where pointer-down started a drag selection. */
+  private _dragStartGid = 0;
+
+  /** Whether a drag selection is in progress. */
+  private _isDragging = false;
 
   override async willUpdate(changed: PropertyValues): Promise<void> {
     if (changed.has('tileset') && this.tileset?.image) {
@@ -119,7 +141,12 @@ export class BsTilesetPanel extends BaseElement {
 
     const style = `--columns: ${this.tileset.columns}; --tile-width: ${this.tileset.tileWidth}px`;
     return html`
-      <div class="tile-grid" style=${style}>
+      <div
+        class="tile-grid"
+        style=${style}
+        @pointerup=${this._onGridPointerUp}
+        @pointerleave=${this._onGridPointerLeave}
+      >
         ${this._renderTiles()}
       </div>
     `;
@@ -138,10 +165,11 @@ export class BsTilesetPanel extends BaseElement {
     const rect = this.tileset!.getTileRect(gid);
     if (!rect) return nothing;
 
-    const selected = gid === this.selectedGid;
+    const selected = gid === this.selectedGid && this._stampGids.size === 0;
+    const inStamp = this._stampGids.has(gid);
     return html`
       <div
-        class="tile ${selected ? 'selected' : ''}"
+        class="tile ${selected ? 'selected' : ''} ${inStamp ? 'in-stamp' : ''}"
         style="
           width: ${this.tileset!.tileWidth}px;
           height: ${this.tileset!.tileHeight}px;
@@ -149,16 +177,118 @@ export class BsTilesetPanel extends BaseElement {
           background-position: -${rect.x}px -${rect.y}px;
           background-size: ${this._imageWidth}px ${this._imageHeight}px;
         "
-        @click=${() => this._selectTile(gid)}
+        @pointerdown=${(e: PointerEvent) => this._onTilePointerDown(e, gid)}
+        @pointerenter=${() => this._onTilePointerEnter(gid)}
       ></div>
     `;
   }
 
-  private _selectTile(gid: number): void {
-    this.selectedGid = gid;
+  /** Start a drag selection on pointer down. */
+  private _onTilePointerDown(e: PointerEvent, gid: number): void {
+    if (e.button !== 0) return;
+    this._isDragging = true;
+    this._dragStartGid = gid;
+    this._stampGids = new Set<number>();
+  }
+
+  /** Update the drag selection as the pointer enters a new tile. */
+  private _onTilePointerEnter(gid: number): void {
+    if (!this._isDragging) return;
+    this._updateDragHighlight(gid);
+  }
+
+  /** Finalize the selection on pointer up. */
+  private _onGridPointerUp = (): void => {
+    if (!this._isDragging) return;
+    this._isDragging = false;
+    this._finalizeDragSelection();
+  };
+
+  /** Cancel drag if pointer leaves the grid. */
+  private _onGridPointerLeave = (): void => {
+    if (!this._isDragging) return;
+    this._isDragging = false;
+    this._finalizeDragSelection();
+  };
+
+  /** Compute the rectangular region between dragStart and current GID. */
+  private _getDragRect(endGid: number): { startCol: number; startRow: number; endCol: number; endRow: number } {
+    const ts = this.tileset!;
+    const startLocal = this._dragStartGid - ts.firstGid;
+    const endLocal = endGid - ts.firstGid;
+
+    const startCol = startLocal % ts.columns;
+    const startRow = Math.floor(startLocal / ts.columns);
+    const endCol = endLocal % ts.columns;
+    const endRow = Math.floor(endLocal / ts.columns);
+
+    return {
+      startCol: Math.min(startCol, endCol),
+      startRow: Math.min(startRow, endRow),
+      endCol: Math.max(startCol, endCol),
+      endRow: Math.max(startRow, endRow),
+    };
+  }
+
+  /** Update the visual highlight during drag. */
+  private _updateDragHighlight(endGid: number): void {
+    const ts = this.tileset!;
+    const { startCol, startRow, endCol, endRow } = this._getDragRect(endGid);
+    const gids = new Set<number>();
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        gids.add(ts.firstGid + r * ts.columns + c);
+      }
+    }
+    this._stampGids = gids;
+  }
+
+  /** Emit the correct event based on the final selection size. */
+  private _finalizeDragSelection(): void {
+    const stampGids = this._stampGids;
+
+    // Single tile (click without drag, or 1x1 region)
+    if (stampGids.size <= 1) {
+      const gid = stampGids.size === 1 ? [...stampGids][0] : this._dragStartGid;
+      this._stampGids = new Set<number>();
+      this.selectedGid = gid;
+      this.dispatchEvent(
+        new CustomEvent<TileSelectDetail>('bs-tile-select', {
+          detail: { gid },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      return;
+    }
+
+    // Multi-tile stamp selection
+    const ts = this.tileset!;
+    // Find the top-left GID (smallest in the set)
+    const sortedGids = [...stampGids].sort((a, b) => a - b);
+    const topLeftGid = sortedGids[0];
+    const bottomRightGid = sortedGids[sortedGids.length - 1];
+
+    const topLeftLocal = topLeftGid - ts.firstGid;
+    const bottomRightLocal = bottomRightGid - ts.firstGid;
+
+    const startCol = topLeftLocal % ts.columns;
+    const endCol = bottomRightLocal % ts.columns;
+    const startRow = Math.floor(topLeftLocal / ts.columns);
+    const endRow = Math.floor(bottomRightLocal / ts.columns);
+
+    const width = endCol - startCol + 1;
+    const height = endRow - startRow + 1;
+
+    this.selectedGid = topLeftGid;
     this.dispatchEvent(
-      new CustomEvent<TileSelectDetail>('bs-tile-select', {
-        detail: { gid },
+      new CustomEvent<StampSelectDetail>('bs-stamp-select', {
+        detail: {
+          topLeftGid,
+          width,
+          height,
+          tilesetColumns: ts.columns,
+        },
         bubbles: true,
         composed: true,
       }),

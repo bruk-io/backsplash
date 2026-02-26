@@ -3,6 +3,7 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseElement } from '@bruk-io/bh-01';
 import type { TilemapModel } from '../models/tilemap-model.js';
 import type { TileLayer } from '../models/layer-model.js';
+import type { Stamp } from '../models/selection-model.js';
 import {
   getVisibleTileRange,
   screenToTile,
@@ -86,6 +87,9 @@ export class BsMapCanvas extends BaseElement {
   /** Currently selected tile GID. 0 means no tile selected. */
   @property({ attribute: false }) selectedGid: number = 0;
 
+  /** Multi-tile stamp selection, or null for single-tile brush. */
+  @property({ attribute: false }) stamp: Stamp | null = null;
+
   /** Viewport offset X (pan). */
   @state() private _offsetX = 0;
 
@@ -115,6 +119,10 @@ export class BsMapCanvas extends BaseElement {
 
   /** Cells painted during the current drag stroke ("col,row" keys). */
   private _paintedCells = new Set<string>();
+
+  /** Current hover tile position for ghost preview (-1 means not hovering). */
+  private _hoverCol = -1;
+  private _hoverRow = -1;
 
   /** Canvas element reference. */
   @query('canvas') private _canvas!: HTMLCanvasElement;
@@ -284,6 +292,11 @@ export class BsMapCanvas extends BaseElement {
     if (this.showGrid) {
       this._renderGrid(ctx, cssWidth, cssHeight, startCol, startRow, endCol, endRow);
     }
+
+    // Ghost preview (stamp or single tile) at hover position
+    if (this._hoverCol >= 0 && this._hoverRow >= 0 && !this._isPainting && !this._isPanning) {
+      this._renderGhostPreview(ctx, map, vp);
+    }
   }
 
   /** Draw grid lines at tile boundaries within the visible range. */
@@ -332,6 +345,74 @@ export class BsMapCanvas extends BaseElement {
     }
 
     ctx.stroke();
+  }
+
+  // ── Ghost preview ──────────────────────────────────────────────────
+
+  /** Render a semi-transparent preview of the brush/stamp at the hover position. */
+  private _renderGhostPreview(
+    ctx: CanvasRenderingContext2D,
+    map: TilemapModel,
+    vp: Viewport,
+  ): void {
+    // Only show ghost for brush tool with a selected tile
+    if (this.activeTool !== 'brush' || this.selectedGid === 0) return;
+
+    ctx.globalAlpha = 0.4;
+    ctx.imageSmoothingEnabled = false;
+
+    if (this.stamp) {
+      // Multi-tile stamp ghost
+      for (let sr = 0; sr < this.stamp.height; sr++) {
+        for (let sc = 0; sc < this.stamp.width; sc++) {
+          const gid = this.stamp.gids[sr * this.stamp.width + sc];
+          if (gid === 0) continue;
+
+          const c = this._hoverCol + sc;
+          const r = this._hoverRow + sr;
+          if (c < 0 || c >= map.width || r < 0 || r >= map.height) continue;
+
+          this._renderGhostTile(ctx, map, vp, gid, c, r);
+        }
+      }
+    } else {
+      // Single tile ghost
+      if (this._hoverCol >= 0 && this._hoverCol < map.width &&
+          this._hoverRow >= 0 && this._hoverRow < map.height) {
+        this._renderGhostTile(ctx, map, vp, this.selectedGid, this._hoverCol, this._hoverRow);
+      }
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  /** Render a single ghost tile at the given map position. */
+  private _renderGhostTile(
+    ctx: CanvasRenderingContext2D,
+    map: TilemapModel,
+    vp: Viewport,
+    gid: number,
+    col: number,
+    row: number,
+  ): void {
+    const tileset = map.getTilesetForGid(gid);
+    if (!tileset || !tileset.image) return;
+
+    const rect = tileset.getTileRect(gid);
+    if (!rect) return;
+
+    const dest = tileToScreen(col, row, vp, map.tileWidth, map.tileHeight);
+    ctx.drawImage(
+      tileset.image as CanvasImageSource,
+      rect.x,
+      rect.y,
+      tileset.tileWidth,
+      tileset.tileHeight,
+      dest.x,
+      dest.y,
+      dest.width,
+      dest.height,
+    );
   }
 
   // ── Event handlers ───────────────────────────────────────────────────
@@ -433,6 +514,11 @@ export class BsMapCanvas extends BaseElement {
 
   /** Handle pointer leaving the canvas. */
   private _onPointerLeave = (e: PointerEvent): void => {
+    // Clear ghost preview
+    this._hoverCol = -1;
+    this._hoverRow = -1;
+    this._scheduleRender();
+
     if (this._isPanning) {
       this._isPanning = false;
       this._canvas.releasePointerCapture(e.pointerId);
@@ -504,6 +590,7 @@ export class BsMapCanvas extends BaseElement {
       activeTool: this.activeTool,
       activeLayerIndex: this.activeLayerIndex,
       selectedGid: this.selectedGid,
+      stamp: this.stamp,
       onEyedrop: (gid: number) => {
         this.dispatchEvent(
           new CustomEvent<EyedropDetail>('bs-eyedrop', {
@@ -574,6 +661,13 @@ export class BsMapCanvas extends BaseElement {
           composed: true,
         }),
       );
+
+      // Track hover for ghost preview
+      if (this._hoverCol !== tile.col || this._hoverRow !== tile.row) {
+        this._hoverCol = tile.col;
+        this._hoverRow = tile.row;
+        this._scheduleRender();
+      }
     }
   }
 }

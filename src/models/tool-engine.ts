@@ -1,6 +1,7 @@
 import { TilemapModel } from './tilemap-model.js';
 import { EMPTY_GID } from './gid.js';
 import type { Layer } from './layer-model.js';
+import type { Stamp } from './selection-model.js';
 
 // ── Command types (consumed by HistoryManager in M4) ──────────────────
 
@@ -74,6 +75,8 @@ export interface EditorState {
   activeTool: string;
   activeLayerIndex: number;
   selectedGid: number;
+  /** Multi-tile stamp selection, or null for single-tile brush. */
+  stamp?: Stamp | null;
   /** Called by the eyedropper strategy when a non-empty tile is picked. */
   onEyedrop?: (gid: number) => void;
 }
@@ -115,12 +118,15 @@ export const brush: ToolStrategy = (
     return null;
   }
 
-  const { activeLayerIndex, selectedGid } = state;
+  const { activeLayerIndex } = state;
   const { col, row } = event;
 
-  // Check bounds — if out of bounds, getCellGid returns 0 and
-  // setCellGid is a no-op. We detect this by checking coordinates
-  // against the tilemap dimensions directly.
+  // Multi-tile stamp painting
+  if (state.stamp) {
+    return stampBrush(event, state, tilemap);
+  }
+
+  // Single-tile painting
   if (
     col < 0 ||
     col >= tilemap.width ||
@@ -132,11 +138,11 @@ export const brush: ToolStrategy = (
 
   const oldGid = tilemap.getCellGid(activeLayerIndex, col, row);
 
-  if (oldGid === selectedGid) {
+  if (oldGid === state.selectedGid) {
     return null;
   }
 
-  tilemap.setCellGid(activeLayerIndex, col, row, selectedGid);
+  tilemap.setCellGid(activeLayerIndex, col, row, state.selectedGid);
 
   return {
     type: 'paint',
@@ -146,11 +152,55 @@ export const brush: ToolStrategy = (
         col,
         row,
         oldGid,
-        newGid: selectedGid,
+        newGid: state.selectedGid,
       },
     ],
   };
 };
+
+/**
+ * Paint a multi-tile stamp at the given origin cell.
+ *
+ * Cells that fall outside the map are silently skipped.
+ * GID 0 entries in the stamp are treated as transparent (skipped).
+ * Returns all changed cells as a single PaintCommand batch.
+ */
+function stampBrush(
+  event: ToolEvent,
+  state: EditorState,
+  tilemap: TilemapModel,
+): Command | null {
+  if (event.type === 'up') return null;
+
+  const stamp = state.stamp!;
+  const { activeLayerIndex } = state;
+  const { col: originCol, row: originRow } = event;
+
+  const edits: CellEdit[] = [];
+
+  for (let sr = 0; sr < stamp.height; sr++) {
+    for (let sc = 0; sc < stamp.width; sc++) {
+      const newGid = stamp.gids[sr * stamp.width + sc];
+      if (newGid === EMPTY_GID) continue; // transparent cell in stamp
+
+      const c = originCol + sc;
+      const r = originRow + sr;
+
+      // Skip cells outside the map
+      if (c < 0 || c >= tilemap.width || r < 0 || r >= tilemap.height) {
+        continue;
+      }
+
+      const oldGid = tilemap.getCellGid(activeLayerIndex, c, r);
+      if (oldGid === newGid) continue; // no change
+
+      tilemap.setCellGid(activeLayerIndex, c, r, newGid);
+      edits.push({ layerIndex: activeLayerIndex, col: c, row: r, oldGid, newGid });
+    }
+  }
+
+  return edits.length > 0 ? { type: 'paint', edits } : null;
+}
 
 // ── Eraser strategy ───────────────────────────────────────────────────
 
