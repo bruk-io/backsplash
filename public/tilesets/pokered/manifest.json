@@ -1,0 +1,13 @@
+{
+  "tileWidth": 8,
+  "tileHeight": 8,
+  "margin": 0,
+  "spacing": 0,
+  "tilesets": [
+    { "name": "Overworld", "file": "overworld.png" },
+    { "name": "Red's House", "file": "reds_house.png" },
+    { "name": "Pokecenter", "file": "pokecenter.png" },
+    { "name": "Gym", "file": "gym.png" },
+    { "name": "Forest", "file": "forest.png" }
+  ]
+}

@@ -128,6 +128,9 @@ export class BsMapCanvas extends BaseElement {
   /** Whether the active layer is an object layer (set by parent). */
   @property({ type: Boolean, attribute: 'object-mode' }) objectMode = false;
 
+  /** When true, pause the rAF render loop (renders once then stops). Used by Playwright for screenshots. */
+  @property({ type: Boolean, reflect: true }) freeze = false;
+
   /** Viewport offset X (pan). */
   @state() private _offsetX = 0;
 
@@ -272,7 +275,7 @@ export class BsMapCanvas extends BaseElement {
 
   /** Request a canvas render on the next animation frame. */
   private _scheduleRender(): void {
-    if (this._renderPending) return;
+    if (this._renderPending || this.freeze) return;
     this._renderPending = true;
     this._rafId = requestAnimationFrame(() => {
       this._renderPending = false;
