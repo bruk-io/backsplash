@@ -206,7 +206,7 @@ model {
         description '''
           Rendered inline in EditorShell using bh-toolbar — not
           a standalone component. Provides tool selection (brush,
-          eraser, fill, eyedropper), undo/redo buttons, and
+          eraser, select, fill, eyedropper), undo/redo buttons, and
           save/export triggers. Tool state and keyboard shortcuts
           (B/E/G/I, Ctrl+Z/Ctrl+Shift+Z) handled by the shell.
         '''

@@ -783,6 +783,28 @@ describe('brush with stamp', () => {
     }
   });
 
+  it('clips stamp that extends beyond top-left edge (negative origin)', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    const stamp = { width: 2, height: 2, gids: [1, 2, 3, 4] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: -1, row: -1 });
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      // Only cell (0,0) is in bounds (sc=1, sr=1 → c=0, r=0, gid=4)
+      expect(cmd!.edits).toHaveLength(1);
+      expect(cmd!.edits[0]).toEqual({
+        layerIndex: 0,
+        col: 0,
+        row: 0,
+        oldGid: 0,
+        newGid: 4,
+      });
+    }
+  });
+
   it('works with pointer move events (drag)', () => {
     const map = makeMap({ width: 4, height: 4 });
     const stamp = { width: 2, height: 1, gids: [1, 2] };
