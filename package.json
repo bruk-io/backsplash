@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
-    "arch": "likec4 serve ./docs/architecture"
+    "arch": "likec4 serve ./docs/architecture",
+    "download-tilesets": "bash scripts/download-tilesets.sh"
   },
   "dependencies": {
     "@bruk-io/bh-01": "file:../bh-01",

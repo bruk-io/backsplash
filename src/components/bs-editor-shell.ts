@@ -175,9 +175,10 @@ export class BsEditorShell extends BaseElement {
 
   /** Create a default empty tilemap so the canvas shows a grid on first load. */
   private _initDemoTilemap(): void {
-    const tileSize = 32;
+    // Game Boy screen: 160×144 px = 20×18 tiles at 8×8
+    const tileSize = 8;
     const mapWidth = 20;
-    const mapHeight = 15;
+    const mapHeight = 18;
 
     this._tilemap = new TilemapModel({
       width: mapWidth,
@@ -186,6 +187,63 @@ export class BsEditorShell extends BaseElement {
       tileHeight: tileSize,
     });
     this._store.tilemap = this._tilemap;
+
+    // Fire-and-forget — editor renders immediately, tilesets appear async
+    this._loadDefaultTilesets();
+  }
+
+  /** Fetch pokered manifest and load tilesets. No-ops gracefully on 404. */
+  private async _loadDefaultTilesets(): Promise<void> {
+    const manifestUrl = '/tilesets/pokered/manifest.json';
+
+    let manifest: {
+      tileWidth: number;
+      tileHeight: number;
+      margin: number;
+      spacing: number;
+      tilesets: { name: string; file: string }[];
+    };
+
+    try {
+      const res = await fetch(manifestUrl);
+      if (!res.ok) return;
+      manifest = await res.json();
+    } catch {
+      return; // Network error or missing file — silently skip
+    }
+
+    for (const entry of manifest.tilesets) {
+      try {
+        const imgRes = await fetch(`/tilesets/pokered/${entry.file}`);
+        if (!imgRes.ok) continue;
+        const blob = await imgRes.blob();
+        const image = await createImageBitmap(blob);
+
+        const tilesets = this._tilemap!.tilesets;
+        const firstGid = tilesets.length > 0
+          ? tilesets[tilesets.length - 1].lastGid + 1
+          : 1;
+
+        const tileset = new TilesetModel({
+          name: entry.name,
+          image,
+          tileWidth: manifest.tileWidth,
+          tileHeight: manifest.tileHeight,
+          imageWidth: image.width,
+          imageHeight: image.height,
+          margin: manifest.margin,
+          spacing: manifest.spacing,
+          firstGid,
+        });
+
+        this._tilemap!.addTileset(tileset);
+      } catch {
+        continue; // Skip individual failures
+      }
+    }
+
+    // Update UI after all tilesets loaded
+    this.requestUpdate();
   }
 
   private _onViewportChange = (e: CustomEvent<ViewportChangeDetail>): void => {
