@@ -1,6 +1,9 @@
 import { html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseElement, BhIcon } from '@bruk-io/bh-01';
+import { TilemapModel } from '../models/tilemap-model.js';
+import { TilesetModel } from '../models/tileset-model.js';
+import type { ViewportChangeDetail, CellHoverDetail } from './bs-map-canvas.js';
 
 // Register editor icons
 BhIcon.register('layers', '<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>');
@@ -64,10 +67,86 @@ export class BsEditorShell extends BaseElement {
   ];
 
   @state() private _panel: PanelId = 'layers';
+  @state() private _tilemap: TilemapModel | null = null;
+  @state() private _zoomPercent = 100;
+  @state() private _cursorCol = 0;
+  @state() private _cursorRow = 0;
 
   private get _sidebarOpen() {
     return this._panel !== '';
   }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this._initDemoTilemap();
+  }
+
+  /** Create a demo tilemap with colored-rectangle tiles to prove the rendering pipeline. */
+  private _initDemoTilemap(): void {
+    const tileSize = 32;
+    const cols = 4;
+    const rows = 4;
+    const imgW = cols * tileSize;
+    const imgH = rows * tileSize;
+
+    // Generate a colored-rectangle tileset via OffscreenCanvas
+    const offscreen = new OffscreenCanvas(imgW, imgH);
+    const ctx = offscreen.getContext('2d')!;
+    const colors = [
+      '#4a9eff', '#ff6b6b', '#51cf66', '#ffd43b',
+      '#cc5de8', '#ff922b', '#20c997', '#748ffc',
+      '#f06595', '#94d82d', '#fcc419', '#22b8cf',
+      '#845ef7', '#ff8787', '#69db7c', '#fab005',
+    ];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillStyle = colors[r * cols + c];
+        ctx.fillRect(c * tileSize, r * tileSize, tileSize, tileSize);
+      }
+    }
+
+    // Convert to ImageBitmap and create the tileset + tilemap
+    createImageBitmap(offscreen).then((bitmap) => {
+      const tileset = new TilesetModel({
+        name: 'Demo Tileset',
+        image: bitmap,
+        tileWidth: tileSize,
+        tileHeight: tileSize,
+        imageWidth: imgW,
+        imageHeight: imgH,
+        firstGid: 1,
+      });
+
+      const mapWidth = 20;
+      const mapHeight = 15;
+      const tilemap = new TilemapModel({
+        width: mapWidth,
+        height: mapHeight,
+        tileWidth: tileSize,
+        tileHeight: tileSize,
+      });
+      tilemap.addTileset(tileset);
+
+      // Fill with a checkerboard/pattern using available GIDs (1-16)
+      for (let row = 0; row < mapHeight; row++) {
+        for (let col = 0; col < mapWidth; col++) {
+          const gid = ((col + row) % 16) + 1;
+          tilemap.setCellGid(0, col, row, gid);
+        }
+      }
+
+      this._tilemap = tilemap;
+    });
+  }
+
+  private _onViewportChange = (e: CustomEvent<ViewportChangeDetail>): void => {
+    this._zoomPercent = Math.round(e.detail.zoom * 100);
+  };
+
+  private _onCellHover = (e: CustomEvent<CellHoverDetail>): void => {
+    this._cursorCol = e.detail.col;
+    this._cursorRow = e.detail.row;
+  };
 
   override render() {
     return html`
@@ -127,19 +206,27 @@ export class BsEditorShell extends BaseElement {
           </bh-toolbar>
 
           <div class="canvas-area">
-            <bh-center intrinsic>
-              <bh-stack gap="xs" align="center">
-                <bh-text variant="small">No map loaded</bh-text>
-                <bh-text variant="small" style="color:var(--bh-color-text-muted)">Import a tileset to get started</bh-text>
-              </bh-stack>
-            </bh-center>
+            ${this._tilemap
+              ? html`<bs-map-canvas
+                  .tilemap=${this._tilemap}
+                  show-grid
+                  @bs-viewport-change=${this._onViewportChange}
+                  @bs-cell-hover=${this._onCellHover}
+                ></bs-map-canvas>`
+              : html`<bh-center intrinsic>
+                  <bh-stack gap="xs" align="center">
+                    <bh-text variant="small">No map loaded</bh-text>
+                    <bh-text variant="small" style="color:var(--bh-color-text-muted)">Import a tileset to get started</bh-text>
+                  </bh-stack>
+                </bh-center>`
+            }
           </div>
         </div>
 
         <!-- Status bar -->
         <bh-status-bar slot="status" message="Ready">
-          <span slot="end">Zoom: 100%</span>
-          <span slot="end">0, 0</span>
+          <span slot="end">Zoom: ${this._zoomPercent}%</span>
+          <span slot="end">${this._cursorCol}, ${this._cursorRow}</span>
         </bh-status-bar>
 
       </bh-app-shell>
