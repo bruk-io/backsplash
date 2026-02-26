@@ -1,0 +1,264 @@
+// Backsplash - Tile Map Editor Architecture
+// C4 Model: System Context + Container + Component definitions
+
+model {
+
+  // ── Actors ────────────────────────────────────────────────────────
+  gamedev = actor 'Game Developer' {
+    description 'Creates 2D tilemaps for games using the editor'
+  }
+
+  // ── External Systems ──────────────────────────────────────────────
+  filesystem = softwareSystem 'Local Filesystem' {
+    #external
+    description 'Browser File System Access API or file input for loading/saving'
+  }
+
+  gameEngine = softwareSystem 'Game Engine' {
+    #external
+    description 'Consumes exported tilemap data (Godot, Unity, custom JS, etc.)'
+  }
+
+  componentLib = softwareSystem 'bh-01 Component Library' {
+    #external
+    description 'Shared Lit 3 web component library providing atoms, molecules, and organisms (buttons, panels, dialogs, etc.)'
+    technology 'Lit 3, TypeScript'
+  }
+
+  // ── Backsplash (the system under design) ──────────────────────────
+  backsplash = softwareSystem 'Backsplash' {
+    description 'Browser-based tile map editor built with Lit web components'
+
+    // ── Containers ────────────────────────────────────────────────
+    editorApp = container 'Editor Application' {
+      #core
+      description 'Single-page web application — the editor UI shell'
+      technology 'Lit 3, TypeScript, Vite'
+
+      // ── Components: Core Domain ───────────────────────────────
+
+      editorStore = component 'Editor Store' {
+        #core, #reactive
+        description '''
+          Reactive state container and single source of truth for
+          editor-wide state: active tool, active layer, active
+          tileset, selected tile(s)/stamp, viewport pan/zoom.
+          UI components subscribe to state changes via signals.
+          Core models are plain data; the store provides reactive
+          wrappers and derived values.
+        '''
+        technology 'TypeScript'
+      }
+
+      tilesetModel = component 'Tileset Model' {
+        #core
+        description '''
+          Loads tileset images, slices into indexed tiles,
+          stores tile metadata (id, position, properties).
+          Handles margin/spacing calculations. Manages GID
+          namespace across multiple tilesets (first tileset
+          owns GIDs 1-N, second owns N+1-M, etc.).
+        '''
+        technology 'TypeScript'
+      }
+
+      tileDetector = component 'Tile Size Detector' {
+        #core, #worker
+        description '''
+          Auto-detects tile dimensions from a raw spritesheet image.
+          Runs in a Web Worker via OffscreenCanvas to avoid blocking
+          the main thread. Uses edge detection (grid-line scanning),
+          common-size heuristics (8/16/32/64), and divisibility
+          analysis. Returns ranked candidates for user confirmation.
+        '''
+        technology 'TypeScript, Web Worker, OffscreenCanvas'
+      }
+
+      tilemapModel = component 'Tilemap Model' {
+        #core
+        description '''
+          Core data structure: map dimensions, tile size, and
+          tileset references. Cells store GIDs (global tile IDs)
+          in flat Uint32Arrays. Owns the layer stack via the
+          Layer Model. GID top 3 bits encode flip/rotation flags.
+        '''
+        technology 'TypeScript'
+      }
+
+      layerModel = component 'Layer Model' {
+        #core
+        description '''
+          Owned by Tilemap Model. Layer types: TileLayer (grid
+          of GIDs), ObjectLayer (freeform positioned entities).
+          Each layer has name, visibility, opacity, lock state,
+          and z-order.
+        '''
+        technology 'TypeScript'
+      }
+
+      selectionModel = component 'Selection Model' {
+        #core
+        description '''
+          Holds the current selection state: single tile GID,
+          multi-tile stamp (startGID, width, height from tileset
+          drag-select), or map region selection (rectangular area
+          of cells for copy/cut/move). The brush tool reads from
+          this to know what to paint.
+        '''
+        technology 'TypeScript'
+      }
+
+      toolEngine = component 'Tool Engine' {
+        #core
+        description '''
+          Stateless tool strategies. Each tool (brush, eraser,
+          bucket fill, rectangle fill, selection, eyedropper)
+          receives (event, editorState, tilemapModel) and returns
+          a Command object. No internal state — active tool
+          identity lives in Editor Store.
+        '''
+        technology 'TypeScript'
+      }
+
+      historyManager = component 'History Manager' {
+        #core
+        description '''
+          Undo/redo via command pattern. Every map and layer
+          mutation is captured as a reversible command. Fixed-size
+          stack bounded by both command count and byte size to
+          prevent memory exhaustion from large flood fills.
+        '''
+        technology 'TypeScript'
+      }
+
+      serializer = component 'Serializer' {
+        #core
+        description '''
+          Save/load projects as JSON. Export to engine-specific
+          formats (Tiled JSON, Godot .tscn, raw 2D arrays).
+          Import from Tiled JSON. On project open, tileset image
+          references are re-linked via File System Access API
+          handles persisted in IndexedDB.
+        '''
+        technology 'TypeScript'
+      }
+
+      // ── Components: UI Shell ──────────────────────────────────
+
+      mapCanvas = component 'Map Canvas' {
+        description '''
+          Main viewport rendering the tilemap via HTML Canvas.
+          Handles pan, zoom, grid overlay, and tool interactions.
+          Uses viewport culling (only renders tiles within the
+          visible region) and dirty-region tracking to avoid full
+          re-renders. Composites visible layers with per-layer
+          opacity using offscreen canvases.
+        '''
+        technology 'Lit 3, Canvas API'
+      }
+
+      tilesetPanel = component 'Tileset Panel' {
+        description '''
+          Displays loaded tilesets as a grid. Allows single-tile
+          and multi-tile (stamp) selection via drag-select.
+          Writes selection state to Selection Model.
+        '''
+        technology 'Lit 3'
+      }
+
+      layerPanel = component 'Layer Panel' {
+        description '''
+          Layer list with drag-to-reorder, visibility toggles,
+          opacity sliders, lock toggles, add/remove/rename.
+          Layer mutations are recorded in History Manager.
+        '''
+        technology 'Lit 3'
+      }
+
+      toolbar = component 'Toolbar' {
+        description '''
+          Tool selection (brush, eraser, fill, select, etc.),
+          undo/redo buttons, zoom controls, save/export triggers.
+        '''
+        technology 'Lit 3'
+      }
+
+      importDialog = component 'Import Dialog' {
+        description '''
+          Tileset import wizard: file picker, dispatches image
+          to Tile Size Detector worker, displays grid overlay
+          preview for user confirmation, manual size override,
+          margin/spacing fields.
+        '''
+        technology 'Lit 3'
+      }
+    }
+  }
+
+  // ── Relationships: System Context ─────────────────────────────────
+  gamedev -> backsplash 'creates tilemaps with'
+  backsplash -> filesystem 'reads/writes project files via'
+  backsplash -> gameEngine 'exports tilemap data to'
+  backsplash -> componentLib 'built with'
+
+  // ── Relationships: Container Level ────────────────────────────────
+  gamedev -> editorApp 'uses in browser'
+  editorApp -> componentLib 'imports UI components from'
+  editorApp -> filesystem 'reads images, saves projects via'
+
+  // ── Relationships: Component Level ────────────────────────────────
+
+  // Editor Store — central reactive state
+  editorStore -> tilesetModel 'holds reference to'
+  editorStore -> tilemapModel 'holds reference to'
+  editorStore -> selectionModel 'holds reference to'
+  editorStore -> toolEngine 'provides state to'
+
+  // Tilemap owns layers
+  tilemapModel -> layerModel 'contains ordered stack of'
+
+  // Import flow
+  importDialog -> tileDetector 'posts image data to worker'
+  tileDetector -> tilesetModel 'creates tileset from detected grid'
+  importDialog -> tilesetModel 'creates tileset with manual size'
+
+  // Tileset panel
+  tilesetPanel -> tilesetModel 'reads tile data from'
+  tilesetPanel -> selectionModel 'writes tile/stamp selection to'
+
+  // Map canvas rendering — subscribes to store for reactive updates
+  mapCanvas -> editorStore 'subscribes to state changes'
+  mapCanvas -> tilemapModel 'reads map data from'
+  mapCanvas -> layerModel 'reads visible layers from'
+  mapCanvas -> tilesetModel 'reads tile images from'
+
+  // Tool interactions
+  toolbar -> editorStore 'sets active tool in'
+  mapCanvas -> toolEngine 'dispatches pointer events to'
+  toolEngine -> tilemapModel 'mutates map cells via'
+  toolEngine -> layerModel 'mutates layer properties via'
+  toolEngine -> historyManager 'records commands in'
+  toolEngine -> selectionModel 'reads active selection from'
+
+  // Layer management
+  layerPanel -> layerModel 'manages layers via'
+  layerPanel -> editorStore 'sets active layer in'
+  layerPanel -> historyManager 'records layer commands in'
+
+  // History
+  toolbar -> historyManager 'triggers undo/redo in'
+  historyManager -> tilemapModel 'restores map state in'
+  historyManager -> layerModel 'restores layer state in'
+
+  // Serialization
+  toolbar -> serializer 'triggers save/export in'
+  serializer -> tilemapModel 'serializes/deserializes'
+  serializer -> tilesetModel 'serializes/deserializes'
+  serializer -> layerModel 'serializes/deserializes'
+
+  // Reactive notifications — store emits, UI subscribes
+  editorStore -> mapCanvas 'emits state changes to'
+  editorStore -> tilesetPanel 'emits state changes to'
+  editorStore -> layerPanel 'emits state changes to'
+  editorStore -> toolbar 'emits state changes to'
+}

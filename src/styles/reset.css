@@ -1,0 +1,20 @@
+@import '@bruk-io/bh-01/tokens';
+@import '@bruk-io/bh-01/theme';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bh-color-bg);
+  color: var(--bh-color-text);
+  font-family: var(--bh-font-sans);
+  font-size: var(--bh-text-sm);
+}
