@@ -90,6 +90,9 @@ export class BsMapCanvas extends BaseElement {
   /** Multi-tile stamp selection, or null for single-tile brush. */
   @property({ attribute: false }) stamp: Stamp | null = null;
 
+  /** Monotonic counter — bump to force canvas re-render when tilemap is mutated in place. */
+  @property({ type: Number }) renderVersion = 0;
+
   /** Viewport offset X (pan). */
   @state() private _offsetX = 0;
 

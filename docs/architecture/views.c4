@@ -266,8 +266,31 @@ views {
     backsplash.editorApp.tilemapModel -> backsplash.editorApp.mapCanvas 'shell calls requestUpdate(), canvas re-renders via props'
   }
 
-  // ── Flow 8: Save / Export (PLANNED — M7) ────────────────────
-  // Depends on Serializer component.
+  // ── Flow 8: Save / Open / Export ─────────────────────────────
+  dynamic view saveFlow {
+    title 'Save / Open / Export Flow'
+    description '''
+      User saves, opens, or exports a tilemap project. Save writes
+      the .backsplash JSON format via File System Access API.
+      Open reads a .backsplash file and restores the tilemap.
+      Export writes Tiled JSON or raw 2D array format.
+      Keyboard shortcuts: Ctrl+S (save), Ctrl+O (open).
+    '''
+
+    // Save flow
+    gamedev -> backsplash.editorApp.toolbar 'clicks save or presses Ctrl+S'
+    backsplash.editorApp.toolbar -> backsplash.editorApp.serializer 'shell calls saveToJson(tilemap)'
+    backsplash.editorApp.serializer -> backsplash.editorApp.tilemapModel 'reads map data, layers, tilesets'
+
+    // Open flow
+    gamedev -> backsplash.editorApp.toolbar 'clicks open or presses Ctrl+O'
+    backsplash.editorApp.toolbar -> backsplash.editorApp.serializer 'shell calls loadFromJson(fileContent)'
+    backsplash.editorApp.serializer -> backsplash.editorApp.tilemapModel 'creates new TilemapModel from schema'
+
+    // Export flow
+    gamedev -> backsplash.editorApp.toolbar 'clicks export'
+    backsplash.editorApp.toolbar -> backsplash.editorApp.serializer 'shell calls exportToTiledJson or exportToRawArrays'
+  }
 
   // ── Flow 9: Layer Management ─────────────────────────────────
   dynamic view layerFlow {

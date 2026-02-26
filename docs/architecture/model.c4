@@ -147,11 +147,18 @@ model {
       }
 
       serializer = component 'Serializer' {
-        #core, #planned
+        #core
         description '''
-          Planned (M7). Will save/load projects as JSON, export
-          to engine-specific formats (Tiled JSON, Godot .tscn,
-          raw 2D arrays), and import from Tiled JSON.
+          Save/load/export tilemap projects. Defines the .backsplash
+          JSON schema (ProjectSchema) and provides pure functions for
+          serializing and deserializing TilemapModel, LayerModel, and
+          TilesetModel. Supports three export formats: native
+          .backsplash JSON (save/load round-trip), Tiled JSON v1.10
+          (for Tiled editor compatibility), and raw 2D arrays (for
+          custom game engines). Tileset images are not stored in the
+          JSON — they must be re-linked on load via re-import.
+          The shell wires save (Ctrl+S), open (Ctrl+O), and export
+          buttons to File System Access API file pickers.
         '''
         technology 'TypeScript'
       }
@@ -284,11 +291,9 @@ model {
   layerPanel -> historyManager 'shell pushes layer commands on add/delete/rename/reorder'
   historyManager -> layerModel 'restores layer state on undo/redo'
 
-  // ── Planned relationships (not yet implemented) ─────────────────
-
-  // Serialization (planned M7)
-  // toolbar -> serializer 'triggers save/export in'
-  // serializer -> tilemapModel 'serializes/deserializes'
-  // serializer -> tilesetModel 'serializes/deserializes'
-  // serializer -> layerModel 'serializes/deserializes'
+  // ── Serialization (M7) ──────────────────────────────────────────
+  toolbar -> serializer 'shell triggers save/open/export via File System Access API'
+  serializer -> tilemapModel 'serializes/deserializes map data'
+  serializer -> tilesetModel 'serializes/deserializes tileset metadata (no images)'
+  serializer -> layerModel 'serializes/deserializes layer stack'
 }
