@@ -265,8 +265,12 @@ views {
     backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell adds new tile layer'
     backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes AddLayerCommand'
 
+    gamedev -> backsplash.editorApp.layerPanel 'clicks delete button on a layer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell calls removeLayer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes DeleteLayerCommand'
+
     gamedev -> backsplash.editorApp.layerPanel 'double-clicks layer name'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.layerModel 'shell renames layer via replaceLayer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell renames layer via replaceLayer'
     backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes RenameLayerCommand'
 
     gamedev -> backsplash.editorApp.layerPanel 'drags layer handle to reorder'

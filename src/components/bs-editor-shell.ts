@@ -263,7 +263,7 @@ export class BsEditorShell extends BaseElement {
   }
 
   private _renderLayersPanel() {
-    const layers = this._tilemap?.layers ?? [];
+    const layers = this._tilemap ? [...this._tilemap.layers] : [];
     return html`
       <bh-sidebar-panel style="height:100%">
         <bh-panel-header slot="header" label="Layers"></bh-panel-header>
