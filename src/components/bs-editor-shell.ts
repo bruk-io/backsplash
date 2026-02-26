@@ -114,6 +114,7 @@ export class BsEditorShell extends BaseElement {
   @state() private _stamp: Stamp | null = null;
   @state() private _projectName = 'Untitled Map';
   @state() private _hasUnsavedChanges = false;
+  @state() private _renderVersion = 0;
 
   private _store = new EditorStore();
   private _fileHandle: FileSystemFileHandle | null = null;
@@ -243,6 +244,7 @@ export class BsEditorShell extends BaseElement {
                   .activeLayerIndex=${this._activeLayerIndex}
                   .selectedGid=${this._selectedGid}
                   .stamp=${this._stamp}
+                  .renderVersion=${this._renderVersion}
                   show-grid
                   @bs-viewport-change=${this._onViewportChange}
                   @bs-cell-hover=${this._onCellHover}
@@ -444,6 +446,7 @@ export class BsEditorShell extends BaseElement {
   private _onUndo(): void {
     if (this._tilemap && this._history.canUndo) {
       this._history.undo(this._tilemap);
+      this._renderVersion++;
       this.requestUpdate();
     }
   }
@@ -451,6 +454,7 @@ export class BsEditorShell extends BaseElement {
   private _onRedo(): void {
     if (this._tilemap && this._history.canRedo) {
       this._history.redo(this._tilemap);
+      this._renderVersion++;
       this.requestUpdate();
     }
   }
@@ -521,6 +525,7 @@ export class BsEditorShell extends BaseElement {
     const index = this._tilemap.layers.length - 1;
     this._activeLayerIndex = index;
     this._history.push({ type: 'add-layer', layer, layerIndex: index } satisfies AddLayerCommand);
+    this._renderVersion++;
     this.requestUpdate();
   }
 
@@ -535,6 +540,7 @@ export class BsEditorShell extends BaseElement {
     if (this._activeLayerIndex >= this._tilemap.layers.length) {
       this._activeLayerIndex = this._tilemap.layers.length - 1;
     }
+    this._renderVersion++;
     this.requestUpdate();
   }
 
@@ -586,6 +592,7 @@ export class BsEditorShell extends BaseElement {
     if (this._activeLayerIndex === fromIndex) {
       this._activeLayerIndex = toIndex;
     }
+    this._renderVersion++;
     this.requestUpdate();
   }
 
@@ -692,6 +699,7 @@ export class BsEditorShell extends BaseElement {
   private _replaceLayer(index: number, layer: Layer): void {
     if (!this._tilemap) return;
     this._tilemap.replaceLayer(index, layer);
+    this._renderVersion++;
   }
 }
 
