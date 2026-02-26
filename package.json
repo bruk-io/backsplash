@@ -1,0 +1,26 @@
+{
+  "name": "backsplash",
+  "version": "0.1.0",
+  "description": "Browser-based tile map editor with auto-detection built on Lit web components",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "arch": "likec4 serve ./docs/architecture"
+  },
+  "dependencies": {
+    "@bruk-io/bh-01": "file:../bh-01",
+    "lit": "^3.2.0"
+  },
+  "devDependencies": {
+    "likec4": "^1.50.0",
+    "typescript": "~5.7.0",
+    "vite": "^6.1.0",
+    "vitest": "^4.0.18"
+  }
+}

@@ -1,0 +1,47 @@
+// Backsplash - Tile Map Editor Architecture
+// C4 Model: Specification (element kinds, relationship kinds, tags)
+
+specification {
+
+  // ── C4 Element Kinds ──────────────────────────────────────────────
+  element actor {
+    style {
+      shape person
+      color slate
+    }
+  }
+
+  element softwareSystem {
+    style {
+      color indigo
+      shape rectangle
+    }
+  }
+
+  element container {
+    style {
+      color blue
+    }
+  }
+
+  element component {
+    style {
+      color sky
+    }
+  }
+
+  // ── Relationship Kinds ────────────────────────────────────────────
+  relationship uses
+  relationship reads
+  relationship writes
+  relationship contains
+  relationship emits
+  relationship subscribes
+
+  // ── Tags ──────────────────────────────────────────────────────────
+  tag external
+  tag planned
+  tag core
+  tag worker
+  tag reactive
+}

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Backsplash — Tile Map Editor</title>
+    <link rel="stylesheet" href="/src/styles/reset.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <bs-editor-shell>
+      <bs-toolbar slot="toolbar"></bs-toolbar>
+      <bs-layer-panel slot="sidebar"></bs-layer-panel>
+      <bs-map-canvas slot="canvas"></bs-map-canvas>
+      <bs-tileset-panel slot="bottom"></bs-tileset-panel>
+    </bs-editor-shell>
+  </body>
+</html>
