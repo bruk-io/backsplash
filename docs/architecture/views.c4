@@ -250,9 +250,33 @@ views {
   // ── Flow 8: Save / Export (PLANNED — M7) ────────────────────
   // Depends on Serializer component.
 
-  // ── Flow 9: Layer Management (PLANNED — M5) ─────────────────
-  // Depends on Layer Panel becoming a real component with
-  // interaction handlers.
+  // ── Flow 9: Layer Management ─────────────────────────────────
+  dynamic view layerFlow {
+    title 'Layer Management Flow'
+    description '''
+      User manages the layer stack via the Layer Panel. All
+      operations (add, delete, rename, reorder, visibility,
+      opacity, lock) are emitted as events and handled by
+      the shell. Layer mutations are recorded in the History
+      Manager for undo/redo support.
+    '''
+
+    gamedev -> backsplash.editorApp.layerPanel 'clicks add layer button'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell adds new tile layer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes AddLayerCommand'
+
+    gamedev -> backsplash.editorApp.layerPanel 'clicks delete button on a layer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell calls removeLayer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes DeleteLayerCommand'
+
+    gamedev -> backsplash.editorApp.layerPanel 'double-clicks layer name'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell renames layer via replaceLayer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes RenameLayerCommand'
+
+    gamedev -> backsplash.editorApp.layerPanel 'drags layer handle to reorder'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell calls moveLayer'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes ReorderLayerCommand'
+  }
 
   // ── Flow 10: Object Placement (PLANNED) ─────────────────────
   // Depends on object layer support in ToolEngine and

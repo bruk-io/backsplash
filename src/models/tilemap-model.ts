@@ -90,6 +90,20 @@ export class TilemapModel {
     return this._layers[index];
   }
 
+  /**
+   * Replace the layer at the given index with a new layer object.
+   *
+   * Used by the history system to restore renamed layers (since
+   * setLayerName returns a new object rather than mutating in place).
+   * No-op if the index is out of range.
+   */
+  replaceLayer(index: number, layer: Layer): void {
+    if (index < 0 || index >= this._layers.length) {
+      return;
+    }
+    this._layers[index] = layer;
+  }
+
   // ── Tileset management ────────────────────────────────────────────
 
   /** Registered tilesets. */

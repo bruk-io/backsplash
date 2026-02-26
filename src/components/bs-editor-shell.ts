@@ -7,11 +7,28 @@ import { EditorStore } from '../models/editor-store.js';
 import { SelectionModel } from '../models/selection-model.js';
 import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
 import type { ToolId } from '../models/editor-store.js';
-import type { Command, CellEdit } from '../models/tool-engine.js';
+import type { Command, CellEdit, AddLayerCommand, DeleteLayerCommand, ReorderLayerCommand, RenameLayerCommand } from '../models/tool-engine.js';
 import { HistoryManager } from '../models/history-manager.js';
 import type { TileSizeCandidate } from '../workers/tile-detector-wrapper.js';
 import type { ImportImageDetail, ImportConfirmDetail } from './bs-import-dialog.js';
 import type { ViewportChangeDetail, CellHoverDetail, EyedropDetail } from './bs-map-canvas.js';
+import type {
+  LayerSelectDetail,
+  LayerDeleteDetail,
+  LayerRenameDetail,
+  LayerVisibilityDetail,
+  LayerOpacityDetail,
+  LayerLockDetail,
+  LayerReorderDetail,
+} from './bs-layer-panel.js';
+import {
+  type Layer,
+  createTileLayer,
+  setLayerName,
+  setLayerVisible,
+  setLayerOpacity,
+  setLayerLocked,
+} from '../models/layer-model.js';
 
 // Register editor icons
 BhIcon.register('layers', '<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>');
@@ -32,6 +49,9 @@ BhIcon.register('eyedropper', '<path d="M20.71 5.63l-2.34-2.34a1 1 0 0 0-1.41 0l
 
 // Import bh-01 shell components (side-effect registrations)
 import '@bruk-io/bh-01';
+
+// Import backsplash components (side-effect registrations)
+import './bs-layer-panel.js';
 
 type PanelId = 'layers' | 'tilesets' | '';
 
@@ -86,6 +106,7 @@ export class BsEditorShell extends BaseElement {
   @state() private _selectedGid = 0;
   @state() private _activeTilesetIndex = 0;
   @state() private _activeTool: ToolId = 'brush';
+  @state() private _activeLayerIndex = 0;
 
   private _store = new EditorStore();
   private _selection = new SelectionModel();
@@ -204,7 +225,7 @@ export class BsEditorShell extends BaseElement {
               ? html`<bs-map-canvas
                   .tilemap=${this._tilemap}
                   .activeTool=${this._activeTool}
-                  .activeLayerIndex=${0}
+                  .activeLayerIndex=${this._activeLayerIndex}
                   .selectedGid=${this._selectedGid}
                   show-grid
                   @bs-viewport-change=${this._onViewportChange}
@@ -242,19 +263,22 @@ export class BsEditorShell extends BaseElement {
   }
 
   private _renderLayersPanel() {
+    const layers = this._tilemap ? [...this._tilemap.layers] : [];
     return html`
       <bh-sidebar-panel style="height:100%">
-        <bh-panel-header slot="header" label="Layers">
-          <bh-button slot="end" variant="ghost" size="sm" icon-only label="Add Layer">
-            <bh-icon slot="prefix" name="plus"></bh-icon>
-          </bh-button>
-        </bh-panel-header>
-        <bh-tree selected="layer-1">
-          <bh-tree-item value="layer-1" label="Layer 1">
-            <bh-icon slot="icon" name="layers" size="sm"></bh-icon>
-            <bh-icon slot="end" name="eye" size="sm"></bh-icon>
-          </bh-tree-item>
-        </bh-tree>
+        <bh-panel-header slot="header" label="Layers"></bh-panel-header>
+        <bs-layer-panel
+          .layers=${layers}
+          .activeLayerIndex=${this._activeLayerIndex}
+          @bs-layer-select=${this._onLayerSelect}
+          @bs-layer-add=${this._onLayerAdd}
+          @bs-layer-delete=${this._onLayerDelete}
+          @bs-layer-rename=${this._onLayerRename}
+          @bs-layer-visibility=${this._onLayerVisibility}
+          @bs-layer-opacity=${this._onLayerOpacity}
+          @bs-layer-lock=${this._onLayerLock}
+          @bs-layer-reorder=${this._onLayerReorder}
+        ></bs-layer-panel>
       </bh-sidebar-panel>
     `;
   }
@@ -443,6 +467,98 @@ export class BsEditorShell extends BaseElement {
 
   private _onActivity(e: CustomEvent<{ id: string }>) {
     this._panel = (e.detail.id || '') as PanelId;
+  }
+
+  // ── Layer event handlers ──────────────────────────────────────
+
+  private _onLayerSelect(e: CustomEvent<LayerSelectDetail>): void {
+    this._activeLayerIndex = e.detail.index;
+  }
+
+  private _onLayerAdd(): void {
+    if (!this._tilemap) return;
+    const count = this._tilemap.layers.length;
+    const layer = createTileLayer(
+      `Layer ${count + 1}`,
+      this._tilemap.width,
+      this._tilemap.height,
+      count,
+    );
+    this._tilemap.addLayer(layer);
+    const index = this._tilemap.layers.length - 1;
+    this._activeLayerIndex = index;
+    this._history.push({ type: 'add-layer', layer, layerIndex: index } satisfies AddLayerCommand);
+    this.requestUpdate();
+  }
+
+  private _onLayerDelete(e: CustomEvent<LayerDeleteDetail>): void {
+    if (!this._tilemap || this._tilemap.layers.length <= 1) return;
+    const { index } = e.detail;
+    const layer = this._tilemap.getLayer(index);
+    if (!layer) return;
+    this._tilemap.removeLayer(index);
+    this._history.push({ type: 'delete-layer', layer, layerIndex: index } satisfies DeleteLayerCommand);
+    // Adjust active index if needed.
+    if (this._activeLayerIndex >= this._tilemap.layers.length) {
+      this._activeLayerIndex = this._tilemap.layers.length - 1;
+    }
+    this.requestUpdate();
+  }
+
+  private _onLayerRename(e: CustomEvent<LayerRenameDetail>): void {
+    if (!this._tilemap) return;
+    const { index, name } = e.detail;
+    const layer = this._tilemap.getLayer(index);
+    if (!layer) return;
+    const oldName = layer.name;
+    const updated = setLayerName(layer, name);
+    this._replaceLayer(index, updated);
+    this._history.push({ type: 'rename-layer', layerIndex: index, oldName, newName: name } satisfies RenameLayerCommand);
+    this.requestUpdate();
+  }
+
+  private _onLayerVisibility(e: CustomEvent<LayerVisibilityDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(e.detail.index);
+    if (!layer) return;
+    const updated = setLayerVisible(layer, e.detail.visible);
+    this._replaceLayer(e.detail.index, updated);
+    this.requestUpdate();
+  }
+
+  private _onLayerOpacity(e: CustomEvent<LayerOpacityDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(e.detail.index);
+    if (!layer) return;
+    const updated = setLayerOpacity(layer, e.detail.opacity);
+    this._replaceLayer(e.detail.index, updated);
+    this.requestUpdate();
+  }
+
+  private _onLayerLock(e: CustomEvent<LayerLockDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(e.detail.index);
+    if (!layer) return;
+    const updated = setLayerLocked(layer, e.detail.locked);
+    this._replaceLayer(e.detail.index, updated);
+    this.requestUpdate();
+  }
+
+  private _onLayerReorder(e: CustomEvent<LayerReorderDetail>): void {
+    if (!this._tilemap) return;
+    const { fromIndex, toIndex } = e.detail;
+    this._tilemap.moveLayer(fromIndex, toIndex);
+    this._history.push({ type: 'reorder-layer', fromIndex, toIndex } satisfies ReorderLayerCommand);
+    // Update active index to follow the moved layer.
+    if (this._activeLayerIndex === fromIndex) {
+      this._activeLayerIndex = toIndex;
+    }
+    this.requestUpdate();
+  }
+
+  private _replaceLayer(index: number, layer: Layer): void {
+    if (!this._tilemap) return;
+    this._tilemap.replaceLayer(index, layer);
   }
 }
 

@@ -3,8 +3,17 @@ import {
   HistoryManager,
   estimateCommandBytes,
 } from './history-manager.js';
-import type { Command, PaintCommand, CellEdit } from './tool-engine.js';
-import type { TilemapModel } from './tilemap-model.js';
+import type {
+  Command,
+  PaintCommand,
+  CellEdit,
+  AddLayerCommand,
+  DeleteLayerCommand,
+  ReorderLayerCommand,
+  RenameLayerCommand,
+} from './tool-engine.js';
+import { TilemapModel } from './tilemap-model.js';
+import { createTileLayer, createObjectLayer } from './layer-model.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -435,6 +444,269 @@ describe('HistoryManager — history-change event', () => {
 
     hm.redo(tilemap);
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+// ── Layer command helpers ────────────────────────────────────────────
+
+/** Create a real TilemapModel with the given number of tile layers. */
+function tilemapWithLayers(count: number): TilemapModel {
+  // TilemapModel always starts with one default layer; add more if needed.
+  const tm = new TilemapModel({ width: 4, height: 4, tileWidth: 16, tileHeight: 16 });
+  for (let i = 1; i < count; i++) {
+    tm.addLayer(createTileLayer(`Layer ${i + 1}`, 4, 4));
+  }
+  return tm;
+}
+
+// ── estimateCommandBytes — layer commands ────────────────────────────
+
+describe('estimateCommandBytes — layer commands', () => {
+  it('add-layer with tile layer returns data.byteLength', () => {
+    const layer = createTileLayer('L', 4, 4); // 16 cells × 4 bytes = 64
+    const cmd: AddLayerCommand = { type: 'add-layer', layerIndex: 1, layer };
+    expect(estimateCommandBytes(cmd)).toBe(64);
+  });
+
+  it('add-layer with object layer returns 100', () => {
+    const layer = createObjectLayer('O');
+    const cmd: AddLayerCommand = { type: 'add-layer', layerIndex: 0, layer };
+    expect(estimateCommandBytes(cmd)).toBe(100);
+  });
+
+  it('delete-layer with tile layer returns data.byteLength', () => {
+    const layer = createTileLayer('L', 8, 8); // 64 cells × 4 bytes = 256
+    const cmd: DeleteLayerCommand = { type: 'delete-layer', layerIndex: 0, layer };
+    expect(estimateCommandBytes(cmd)).toBe(256);
+  });
+
+  it('delete-layer with object layer returns 100', () => {
+    const layer = createObjectLayer('O');
+    const cmd: DeleteLayerCommand = { type: 'delete-layer', layerIndex: 0, layer };
+    expect(estimateCommandBytes(cmd)).toBe(100);
+  });
+
+  it('reorder-layer returns 16', () => {
+    const cmd: ReorderLayerCommand = { type: 'reorder-layer', fromIndex: 0, toIndex: 2 };
+    expect(estimateCommandBytes(cmd)).toBe(16);
+  });
+
+  it('rename-layer returns sum of name lengths', () => {
+    const cmd: RenameLayerCommand = {
+      type: 'rename-layer',
+      layerIndex: 0,
+      oldName: 'Background', // 10 chars
+      newName: 'BG',         // 2 chars
+    };
+    expect(estimateCommandBytes(cmd)).toBe(12);
+  });
+});
+
+// ── AddLayerCommand ──────────────────────────────────────────────────
+
+describe('HistoryManager — add-layer undo/redo', () => {
+  it('undo removes the added layer', () => {
+    const tilemap = tilemapWithLayers(1); // starts with 1 layer
+    const hm = new HistoryManager();
+
+    const newLayer = createTileLayer('Layer 2', 4, 4);
+    tilemap.addLayer(newLayer);
+    expect(tilemap.layers.length).toBe(2);
+
+    const cmd: AddLayerCommand = { type: 'add-layer', layerIndex: 1, layer: newLayer };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect(tilemap.layers.length).toBe(1);
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+  });
+
+  it('redo re-adds the layer at the correct index', () => {
+    const tilemap = tilemapWithLayers(1);
+    const hm = new HistoryManager();
+
+    const newLayer = createTileLayer('Layer 2', 4, 4);
+    tilemap.addLayer(newLayer);
+
+    const cmd: AddLayerCommand = { type: 'add-layer', layerIndex: 1, layer: newLayer };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    expect(tilemap.layers.length).toBe(1);
+
+    hm.redo(tilemap);
+    expect(tilemap.layers.length).toBe(2);
+    expect(tilemap.layers[1]!.name).toBe('Layer 2');
+  });
+
+  it('redo inserts layer at correct position (not just appended)', () => {
+    const tilemap = tilemapWithLayers(3); // layers 1, 2, 3
+    const hm = new HistoryManager();
+
+    // Simulate adding a layer at index 1 (between 1 and 2)
+    const newLayer = createTileLayer('Inserted', 4, 4);
+    tilemap.addLayer(newLayer);           // appended at index 3
+    tilemap.moveLayer(3, 1);              // move to index 1
+    expect(tilemap.layers[1]!.name).toBe('Inserted');
+
+    const cmd: AddLayerCommand = { type: 'add-layer', layerIndex: 1, layer: newLayer };
+    hm.push(cmd);
+    hm.undo(tilemap); // removes index 1
+    expect(tilemap.layers.length).toBe(3);
+    expect(tilemap.layers[1]!.name).toBe('Layer 2');
+
+    hm.redo(tilemap); // re-inserts at index 1
+    expect(tilemap.layers.length).toBe(4);
+    expect(tilemap.layers[1]!.name).toBe('Inserted');
+  });
+});
+
+// ── DeleteLayerCommand ───────────────────────────────────────────────
+
+describe('HistoryManager — delete-layer undo/redo', () => {
+  it('undo re-inserts the deleted layer at original index', () => {
+    const tilemap = tilemapWithLayers(2); // Layer 1, Layer 2
+    const hm = new HistoryManager();
+
+    const deleted = tilemap.layers[0]!;
+    tilemap.removeLayer(0);
+    expect(tilemap.layers.length).toBe(1);
+    expect(tilemap.layers[0]!.name).toBe('Layer 2');
+
+    const cmd: DeleteLayerCommand = { type: 'delete-layer', layerIndex: 0, layer: deleted };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect(tilemap.layers.length).toBe(2);
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+    expect(tilemap.layers[1]!.name).toBe('Layer 2');
+  });
+
+  it('redo removes the layer again', () => {
+    const tilemap = tilemapWithLayers(2);
+    const hm = new HistoryManager();
+
+    const deleted = tilemap.layers[1]!;
+    tilemap.removeLayer(1);
+
+    const cmd: DeleteLayerCommand = { type: 'delete-layer', layerIndex: 1, layer: deleted };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    expect(tilemap.layers.length).toBe(2);
+
+    hm.redo(tilemap);
+    expect(tilemap.layers.length).toBe(1);
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+  });
+
+  it('restores full layer data (tile data is preserved) on undo', () => {
+    const tilemap = tilemapWithLayers(2);
+    const hm = new HistoryManager();
+
+    // Paint a cell on layer 0 so it has non-zero data
+    tilemap.setCellGid(0, 0, 0, 42);
+
+    const deleted = tilemap.removeLayer(0)!;
+    const cmd: DeleteLayerCommand = { type: 'delete-layer', layerIndex: 0, layer: deleted };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect(tilemap.getCellGid(0, 0, 0)).toBe(42);
+  });
+});
+
+// ── ReorderLayerCommand ──────────────────────────────────────────────
+
+describe('HistoryManager — reorder-layer undo/redo', () => {
+  it('undo reverses the move', () => {
+    const tilemap = tilemapWithLayers(3); // Layer 1, Layer 2, Layer 3
+    const hm = new HistoryManager();
+
+    tilemap.moveLayer(0, 2); // move Layer 1 to index 2
+    expect(tilemap.layers[0]!.name).toBe('Layer 2');
+    expect(tilemap.layers[2]!.name).toBe('Layer 1');
+
+    const cmd: ReorderLayerCommand = { type: 'reorder-layer', fromIndex: 0, toIndex: 2 };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+    expect(tilemap.layers[2]!.name).toBe('Layer 3');
+  });
+
+  it('redo re-applies the move', () => {
+    const tilemap = tilemapWithLayers(3);
+    const hm = new HistoryManager();
+
+    tilemap.moveLayer(0, 2);
+    const cmd: ReorderLayerCommand = { type: 'reorder-layer', fromIndex: 0, toIndex: 2 };
+    hm.push(cmd);
+
+    hm.undo(tilemap);
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+
+    hm.redo(tilemap);
+    expect(tilemap.layers[0]!.name).toBe('Layer 2');
+    expect(tilemap.layers[2]!.name).toBe('Layer 1');
+  });
+});
+
+// ── RenameLayerCommand ───────────────────────────────────────────────
+
+describe('HistoryManager — rename-layer undo/redo', () => {
+  it('undo restores the old name', () => {
+    const tilemap = tilemapWithLayers(1);
+    const hm = new HistoryManager();
+
+    // Apply the rename manually first
+    tilemap.replaceLayer(0, { ...tilemap.layers[0]!, name: 'Background' });
+    expect(tilemap.layers[0]!.name).toBe('Background');
+
+    const cmd: RenameLayerCommand = {
+      type: 'rename-layer',
+      layerIndex: 0,
+      oldName: 'Layer 1',
+      newName: 'Background',
+    };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+  });
+
+  it('redo re-applies the new name', () => {
+    const tilemap = tilemapWithLayers(1);
+    const hm = new HistoryManager();
+
+    tilemap.replaceLayer(0, { ...tilemap.layers[0]!, name: 'Background' });
+
+    const cmd: RenameLayerCommand = {
+      type: 'rename-layer',
+      layerIndex: 0,
+      oldName: 'Layer 1',
+      newName: 'Background',
+    };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    expect(tilemap.layers[0]!.name).toBe('Layer 1');
+
+    hm.redo(tilemap);
+    expect(tilemap.layers[0]!.name).toBe('Background');
+  });
+
+  it('undo on out-of-range index is a no-op', () => {
+    const tilemap = tilemapWithLayers(1);
+    const hm = new HistoryManager();
+
+    const cmd: RenameLayerCommand = {
+      type: 'rename-layer',
+      layerIndex: 99,
+      oldName: 'Old',
+      newName: 'New',
+    };
+    hm.push(cmd);
+    // Should not throw
+    expect(() => hm.undo(tilemap)).not.toThrow();
+    expect(tilemap.layers.length).toBe(1);
   });
 });
 
