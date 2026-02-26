@@ -11,6 +11,7 @@ import {
   tileToScreen,
   type Viewport,
 } from '../models/viewport.js';
+import { dispatch, type Command, type EditorState } from '../models/tool-engine.js';
 
 /** Zoom multiplier per wheel delta unit. */
 const ZOOM_FACTOR = 0.001;
@@ -32,6 +33,11 @@ export interface ViewportChangeDetail {
 export interface CellHoverDetail {
   col: number;
   row: number;
+}
+
+/** Paint event detail — carries the command produced by a tool. */
+export interface PaintDetail {
+  command: Command;
 }
 
 /**
@@ -66,6 +72,15 @@ export class BsMapCanvas extends BaseElement {
   /** Whether to show the grid overlay. */
   @property({ type: Boolean, attribute: 'show-grid' }) showGrid = true;
 
+  /** Active tool name (e.g. 'brush'). */
+  @property({ attribute: false }) activeTool: string = 'brush';
+
+  /** Index of the active layer for painting. */
+  @property({ attribute: false }) activeLayerIndex: number = 0;
+
+  /** Currently selected tile GID. 0 means no tile selected. */
+  @property({ attribute: false }) selectedGid: number = 0;
+
   /** Viewport offset X (pan). */
   @state() private _offsetX = 0;
 
@@ -89,6 +104,12 @@ export class BsMapCanvas extends BaseElement {
   /** Last pointer position during pan. */
   private _lastPanX = 0;
   private _lastPanY = 0;
+
+  /** Whether a paint drag is active. */
+  private _isPainting = false;
+
+  /** Cells painted during the current drag stroke ("col,row" keys). */
+  private _paintedCells = new Set<string>();
 
   /** Canvas element reference. */
   @query('canvas') private _canvas!: HTMLCanvasElement;
@@ -332,19 +353,33 @@ export class BsMapCanvas extends BaseElement {
     this._emitViewportChange();
   };
 
-  /** Handle pointer down — start panning on middle-click or Space+click. */
+  /** Handle pointer down — start panning on middle-click or Space+click, painting on left-click. */
   private _onPointerDown = (e: PointerEvent): void => {
-    // Middle mouse button (1) or space + left click (0)
+    // Middle mouse button (1) or space + left click (0) → pan
     if (e.button === 1 || (e.button === 0 && this._spaceDown)) {
       e.preventDefault();
       this._isPanning = true;
       this._lastPanX = e.clientX;
       this._lastPanY = e.clientY;
       this._canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // Left-click without space → paint
+    if (e.button === 0) {
+      e.preventDefault();
+      this._isPainting = true;
+      this._paintedCells.clear();
+      this._canvas.setPointerCapture(e.pointerId);
+
+      const tile = this._getTileFromPointer(e);
+      if (tile) {
+        this._paintAtCell(tile.col, tile.row, 'down');
+      }
     }
   };
 
-  /** Handle pointer move — pan or emit hover position. */
+  /** Handle pointer move — pan, paint, or emit hover position. */
   private _onPointerMove = (e: PointerEvent): void => {
     if (this._isPanning) {
       const dx = e.clientX - this._lastPanX;
@@ -358,15 +393,36 @@ export class BsMapCanvas extends BaseElement {
       return;
     }
 
+    if (this._isPainting) {
+      const tile = this._getTileFromPointer(e);
+      if (tile) {
+        this._paintAtCell(tile.col, tile.row, 'move');
+      }
+      return;
+    }
+
     // Emit cell hover
     this._emitCellHover(e);
   };
 
-  /** Handle pointer up — stop panning. */
+  /** Handle pointer up — stop panning or painting. */
   private _onPointerUp = (e: PointerEvent): void => {
     if (this._isPanning) {
       this._isPanning = false;
       this._canvas.releasePointerCapture(e.pointerId);
+      return;
+    }
+
+    if (this._isPainting) {
+      this._isPainting = false;
+      this._paintedCells.clear();
+      this._canvas.releasePointerCapture(e.pointerId);
+      this.dispatchEvent(
+        new CustomEvent('bs-paint-end', {
+          bubbles: true,
+          composed: true,
+        }),
+      );
     }
   };
 
@@ -375,6 +431,17 @@ export class BsMapCanvas extends BaseElement {
     if (this._isPanning) {
       this._isPanning = false;
       this._canvas.releasePointerCapture(e.pointerId);
+    }
+    if (this._isPainting) {
+      this._isPainting = false;
+      this._paintedCells.clear();
+      this._canvas.releasePointerCapture(e.pointerId);
+      this.dispatchEvent(
+        new CustomEvent('bs-paint-end', {
+          bubbles: true,
+          composed: true,
+        }),
+      );
     }
   };
 
@@ -391,6 +458,62 @@ export class BsMapCanvas extends BaseElement {
       this._spaceDown = false;
     }
   };
+
+  // ── Painting helpers ─────────────────────────────────────────────────
+
+  /** Convert a pointer event to tile coordinates, or null if out of bounds. */
+  private _getTileFromPointer(e: PointerEvent): { col: number; row: number } | null {
+    const map = this.tilemap;
+    if (!map) return null;
+
+    const rect = this._canvas.getBoundingClientRect();
+    const cursorX = e.clientX - rect.left;
+    const cursorY = e.clientY - rect.top;
+
+    return screenToTile(
+      cursorX,
+      cursorY,
+      this._viewport,
+      map.width,
+      map.height,
+      map.tileWidth,
+      map.tileHeight,
+    );
+  }
+
+  /**
+   * Paint at the given cell using the tool engine.
+   *
+   * Skip if the cell was already painted in this drag stroke.
+   * Dispatch a `bs-paint` event with the resulting command.
+   */
+  private _paintAtCell(col: number, row: number, eventType: 'down' | 'move'): void {
+    const map = this.tilemap;
+    if (!map) return;
+
+    const key = `${col},${row}`;
+    if (this._paintedCells.has(key)) return;
+    this._paintedCells.add(key);
+
+    const editorState: EditorState = {
+      activeTool: this.activeTool,
+      activeLayerIndex: this.activeLayerIndex,
+      selectedGid: this.selectedGid,
+    };
+
+    const command = dispatch({ type: eventType, col, row }, editorState, map);
+
+    if (command) {
+      this.dispatchEvent(
+        new CustomEvent<PaintDetail>('bs-paint', {
+          detail: { command },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      this._scheduleRender();
+    }
+  }
 
   // ── Event emission ───────────────────────────────────────────────────
 

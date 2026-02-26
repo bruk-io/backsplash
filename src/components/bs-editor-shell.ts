@@ -3,7 +3,11 @@ import { customElement, state } from 'lit/decorators.js';
 import { BaseElement, BhIcon } from '@bruk-io/bh-01';
 import { TilemapModel } from '../models/tilemap-model.js';
 import { TilesetModel } from '../models/tileset-model.js';
+import { EditorStore } from '../models/editor-store.js';
+import { SelectionModel } from '../models/selection-model.js';
 import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
+import type { ToolId } from '../models/editor-store.js';
+import type { Command } from '../models/tool-engine.js';
 import type { TileSizeCandidate } from '../workers/tile-detector-wrapper.js';
 import type { ImportImageDetail, ImportConfirmDetail } from './bs-import-dialog.js';
 import type { ViewportChangeDetail, CellHoverDetail } from './bs-map-canvas.js';
@@ -77,7 +81,11 @@ export class BsEditorShell extends BaseElement {
   @state() private _importDialogOpen = false;
   @state() private _importCandidates: TileSizeCandidate[] = [];
   @state() private _selectedGid = 0;
+  @state() private _activeTilesetIndex = 0;
+  @state() private _activeTool: ToolId = 'brush';
 
+  private _store = new EditorStore();
+  private _selection = new SelectionModel();
   private _detector = new TileDetectorWrapper();
 
   private get _sidebarOpen() {
@@ -101,6 +109,7 @@ export class BsEditorShell extends BaseElement {
       tileWidth: tileSize,
       tileHeight: tileSize,
     });
+    this._store.tilemap = this._tilemap;
   }
 
   private _onViewportChange = (e: CustomEvent<ViewportChangeDetail>): void => {
@@ -136,16 +145,16 @@ export class BsEditorShell extends BaseElement {
         <div class="main-area">
           <bh-toolbar variant="surface" sticky gap="xs">
             <bh-cluster slot="start" gap="xs" nowrap>
-              <bh-button size="sm" variant="ghost" icon-only label="Brush">
+              <bh-button size="sm" variant=${this._activeTool === 'brush' ? 'primary' : 'ghost'} icon-only label="Brush" @click=${() => this._setTool('brush')}>
                 <bh-icon slot="prefix" name="paint-brush"></bh-icon>
               </bh-button>
-              <bh-button size="sm" variant="ghost" icon-only label="Eraser">
+              <bh-button size="sm" variant=${this._activeTool === 'eraser' ? 'primary' : 'ghost'} icon-only label="Eraser" @click=${() => this._setTool('eraser')}>
                 <bh-icon slot="prefix" name="eraser"></bh-icon>
               </bh-button>
-              <bh-button size="sm" variant="ghost" icon-only label="Select">
+              <bh-button size="sm" variant=${this._activeTool === 'select' ? 'primary' : 'ghost'} icon-only label="Select" @click=${() => this._setTool('select')}>
                 <bh-icon slot="prefix" name="cursor"></bh-icon>
               </bh-button>
-              <bh-button size="sm" variant="ghost" icon-only label="Fill">
+              <bh-button size="sm" variant=${this._activeTool === 'fill' ? 'primary' : 'ghost'} icon-only label="Fill" @click=${() => this._setTool('fill')}>
                 <bh-icon slot="prefix" name="paint-bucket"></bh-icon>
               </bh-button>
               <bh-divider vertical spacing="sm"></bh-divider>
@@ -173,9 +182,14 @@ export class BsEditorShell extends BaseElement {
             ${this._tilemap
               ? html`<bs-map-canvas
                   .tilemap=${this._tilemap}
+                  .activeTool=${this._activeTool}
+                  .activeLayerIndex=${0}
+                  .selectedGid=${this._selectedGid}
                   show-grid
                   @bs-viewport-change=${this._onViewportChange}
                   @bs-cell-hover=${this._onCellHover}
+                  @bs-paint=${this._onPaint}
+                  @bs-paint-end=${this._onPaintEnd}
                 ></bs-map-canvas>`
               : html`<bh-center intrinsic>
                   <bh-stack gap="xs" align="center">
@@ -224,7 +238,8 @@ export class BsEditorShell extends BaseElement {
   }
 
   private _renderTilesetsPanel() {
-    const tileset = this._tilemap?.tilesets[0] ?? null;
+    const tilesets = this._tilemap?.tilesets ?? [];
+    const activeTileset = tilesets[this._activeTilesetIndex] ?? null;
     return html`
       <bh-sidebar-panel style="height:100%">
         <bh-panel-header slot="header" label="Tilesets">
@@ -239,12 +254,31 @@ export class BsEditorShell extends BaseElement {
             <bh-icon slot="prefix" name="plus"></bh-icon>
           </bh-button>
         </bh-panel-header>
-        ${tileset
-          ? html`<bs-tileset-panel
-              .tileset=${tileset}
-              .selectedGid=${this._selectedGid}
-              @bs-tile-select=${this._onTileSelect}
-            ></bs-tileset-panel>`
+        ${tilesets.length > 0
+          ? html`
+              ${tilesets.length > 1
+                ? html`<bh-cluster gap="xs" wrap style="padding:var(--bh-spacing-2, 8px)">
+                    ${tilesets.map(
+                      (ts, i) => html`
+                        <bh-button
+                          variant=${i === this._activeTilesetIndex ? 'primary' : 'outline'}
+                          size="sm"
+                          @click=${() => { this._activeTilesetIndex = i; }}
+                        >
+                          ${ts.name || `Tileset ${i + 1}`}
+                        </bh-button>
+                      `,
+                    )}
+                  </bh-cluster>`
+                : nothing}
+              ${activeTileset
+                ? html`<bs-tileset-panel
+                    .tileset=${activeTileset}
+                    .selectedGid=${this._selectedGid}
+                    @bs-tile-select=${this._onTileSelect}
+                  ></bs-tileset-panel>`
+                : nothing}
+            `
           : html`<bh-center intrinsic>
               <bh-stack gap="xs" align="center">
                 <bh-text variant="small" style="color:var(--bh-color-text-tertiary)">
@@ -294,6 +328,7 @@ export class BsEditorShell extends BaseElement {
     });
 
     this._tilemap!.addTileset(tileset);
+    this._activeTilesetIndex = this._tilemap!.tilesets.length - 1;
     this._importDialogOpen = false;
     this._importCandidates = [];
 
@@ -308,6 +343,22 @@ export class BsEditorShell extends BaseElement {
 
   private _onTileSelect(e: CustomEvent<{ gid: number }>): void {
     this._selectedGid = e.detail.gid;
+    this._selection.selectTile(e.detail.gid);
+    this._store.selectedGid = e.detail.gid;
+  }
+
+  private _setTool(tool: ToolId): void {
+    this._activeTool = tool;
+    this._store.activeTool = tool;
+  }
+
+  private _onPaint(_e: CustomEvent<{ command: Command }>): void {
+    // For now just request update to re-render. History comes in M4.
+    this.requestUpdate();
+  }
+
+  private _onPaintEnd(): void {
+    // Future: batch commands into history. For now no-op.
   }
 
   private _onActivity(e: CustomEvent<{ id: string }>) {
