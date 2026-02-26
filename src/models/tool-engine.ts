@@ -1,6 +1,6 @@
 import { TilemapModel } from './tilemap-model.js';
 import { EMPTY_GID } from './gid.js';
-import type { Layer } from './layer-model.js';
+import type { Layer, MapObject } from './layer-model.js';
 import type { Stamp } from './selection-model.js';
 
 // ── Command types (consumed by HistoryManager in M4) ──────────────────
@@ -53,13 +53,49 @@ export interface RenameLayerCommand {
   newName: string;
 }
 
+/** Command produced by adding an object to an object layer. */
+export interface AddObjectCommand {
+  type: 'add-object';
+  layerIndex: number;
+  object: MapObject;
+}
+
+/** Command produced by deleting an object from an object layer. */
+export interface DeleteObjectCommand {
+  type: 'delete-object';
+  layerIndex: number;
+  object: MapObject;
+}
+
+/** Command produced by moving or resizing an object. */
+export interface MoveObjectCommand {
+  type: 'move-object';
+  layerIndex: number;
+  objectId: number;
+  oldObject: MapObject;
+  newObject: MapObject;
+}
+
+/** Command produced by editing object properties. */
+export interface EditObjectCommand {
+  type: 'edit-object';
+  layerIndex: number;
+  objectId: number;
+  oldObject: MapObject;
+  newObject: MapObject;
+}
+
 /** Union of all command types. Will grow as more tools are added. */
 export type Command =
   | PaintCommand
   | AddLayerCommand
   | DeleteLayerCommand
   | ReorderLayerCommand
-  | RenameLayerCommand;
+  | RenameLayerCommand
+  | AddObjectCommand
+  | DeleteObjectCommand
+  | MoveObjectCommand
+  | EditObjectCommand;
 
 // ── Event and state interfaces ────────────────────────────────────────
 

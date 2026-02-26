@@ -320,7 +320,34 @@ views {
     backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'shell pushes ReorderLayerCommand'
   }
 
-  // ── Flow 10: Object Placement (PLANNED) ─────────────────────
-  // Depends on object layer support in ToolEngine and
-  // LayerModel object layer API.
+  // ── Flow 10: Object Layer Interaction ────────────────────────
+
+  dynamic view objectFlow {
+    title 'Flow 10: Object Placement, Selection, Move, and Editing'
+    description '''
+      When an object layer is active, the canvas enters object mode.
+      Users place objects (click=point, drag=rectangle), select them
+      by clicking, move them by dragging, resize via handles, and
+      edit properties in the sidebar panel. All operations are
+      recorded in the history manager for undo/redo.
+    '''
+
+    gamedev -> backsplash.editorApp.layerPanel 'adds an object layer via header button'
+    backsplash.editorApp.layerPanel -> backsplash.editorApp.tilemapModel 'shell creates ObjectLayer and calls addLayer'
+
+    gamedev -> backsplash.editorApp.mapCanvas 'clicks or drags on canvas in object mode'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.layerModel 'shell creates MapObject via addObject and replaces layer'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.historyManager 'shell pushes AddObjectCommand'
+
+    gamedev -> backsplash.editorApp.mapCanvas 'clicks on existing object to select'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.objectProperties 'shell passes selected object to property panel'
+
+    gamedev -> backsplash.editorApp.mapCanvas 'drags selected object to move'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.layerModel 'shell updates object position via updateObject'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.historyManager 'shell pushes MoveObjectCommand on drag end'
+
+    gamedev -> backsplash.editorApp.objectProperties 'edits name, type, or properties'
+    backsplash.editorApp.objectProperties -> backsplash.editorApp.layerModel 'shell updates object via updateObject'
+    backsplash.editorApp.objectProperties -> backsplash.editorApp.historyManager 'shell pushes EditObjectCommand'
+  }
 }
