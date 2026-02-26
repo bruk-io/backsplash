@@ -166,7 +166,6 @@ export class BsImportDialog extends BaseElement {
         @dragover=${this._onDragOver}
         @dragleave=${this._onDragLeave}
         @drop=${this._onDrop}
-        @click=${this._browse}
       >
         <bh-stack gap="sm" align="center">
           <bh-icon name="download" size="lg"></bh-icon>
@@ -345,8 +344,7 @@ export class BsImportDialog extends BaseElement {
 
   // ── Browse handler ────────────────────────────────────────────────
 
-  private _browse(e: Event): void {
-    e.stopPropagation();
+  private _browse(): void {
     this._fileInput?.click();
   }
 
