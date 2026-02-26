@@ -156,3 +156,29 @@ export function setLayerLocked<T extends Layer>(layer: T, locked: boolean): T {
 export function setLayerZOrder<T extends Layer>(layer: T, zOrder: number): T {
   return { ...layer, zOrder };
 }
+
+// ── Object Layer Mutations ────────────────────────────────────────────
+
+/** Add an object to an object layer. Returns a new layer with the object appended. */
+export function addObject(layer: ObjectLayer, obj: MapObject): ObjectLayer {
+  return { ...layer, objects: [...layer.objects, obj] };
+}
+
+/** Remove an object by ID. Returns a new layer without the object. */
+export function removeObject(layer: ObjectLayer, objectId: number): ObjectLayer {
+  return { ...layer, objects: layer.objects.filter(o => o.id !== objectId) };
+}
+
+/** Replace an object by ID. Returns a new layer with the updated object. */
+export function updateObject(layer: ObjectLayer, updated: MapObject): ObjectLayer {
+  return {
+    ...layer,
+    objects: layer.objects.map(o => o.id === updated.id ? updated : o),
+  };
+}
+
+/** Generate the next available object ID for a layer. */
+export function nextObjectId(layer: ObjectLayer): number {
+  if (layer.objects.length === 0) return 1;
+  return Math.max(...layer.objects.map(o => o.id)) + 1;
+}

@@ -137,11 +137,12 @@ model {
         description '''
           Undo/redo via command pattern. Supports PaintCommand
           (cell edits), AddLayerCommand, DeleteLayerCommand,
-          ReorderLayerCommand, and RenameLayerCommand. Fixed-size
-          stack bounded by both command count (100) and byte size
-          (10MB). Extends EventTarget and dispatches history-change
-          events (currently unused — shell calls requestUpdate()
-          directly after undo/redo operations).
+          ReorderLayerCommand, RenameLayerCommand, AddObjectCommand,
+          DeleteObjectCommand, MoveObjectCommand, and EditObjectCommand.
+          Fixed-size stack bounded by both command count (100) and
+          byte size (10MB). Extends EventTarget and dispatches
+          history-change events (currently unused — shell calls
+          requestUpdate() directly after undo/redo operations).
         '''
         technology 'TypeScript'
       }
@@ -175,13 +176,29 @@ model {
           Renders visible layers with per-layer opacity via
           Canvas 2D API. Shows a semi-transparent ghost preview
           of the brush tile or stamp at the hover position.
-          Accepts a stamp property for multi-tile painting and
-          passes it to EditorState for the tool engine. Calls
-          ToolEngine dispatch() inline and emits bs-paint,
-          bs-paint-end, bs-eyedrop, bs-viewport-change, and
-          bs-cell-hover events to the parent shell.
+          In object mode (when active layer is an ObjectLayer),
+          handles object placement (click=point, drag=rectangle),
+          selection (click hit-test), move (drag selected object),
+          and resize (drag selection handles). Renders objects as
+          colored rectangles with type labels, crosshair for point
+          objects, and resize handles on selected objects.
+          Emits bs-paint, bs-paint-end, bs-eyedrop,
+          bs-viewport-change, bs-cell-hover, bs-object-place,
+          bs-object-select, bs-object-move, bs-object-resize,
+          and bs-object-drag-end events to the parent shell.
         '''
         technology 'Lit 3, Canvas API'
+      }
+
+      objectProperties = component 'Object Properties Panel' {
+        description '''
+          When an object is selected on an object layer, displays
+          editable fields for name, type, position (x/y), size
+          (width/height), and a dynamic key-value property editor.
+          Emits bs-object-edit and bs-object-delete events to the
+          parent shell for undo-aware state changes.
+        '''
+        technology 'Lit 3'
       }
 
       tilesetPanel = component 'Tileset Panel' {
@@ -290,6 +307,11 @@ model {
   // Layer history
   layerPanel -> historyManager 'shell pushes layer commands on add/delete/rename/reorder'
   historyManager -> layerModel 'restores layer state on undo/redo'
+
+  // Object layer interactions (M8)
+  mapCanvas -> layerModel 'hit-tests objects on active ObjectLayer'
+  objectProperties -> layerModel 'edits object properties via shell'
+  objectProperties -> historyManager 'shell pushes edit-object commands on property change'
 
   // ── Serialization (M7) ──────────────────────────────────────────
   toolbar -> serializer 'shell triggers save/open/export via File System Access API'

@@ -9,7 +9,7 @@
 import type { TilemapModel } from './tilemap-model.js';
 
 /** Tool identifiers available in the editor. */
-export type ToolId = 'brush' | 'eraser' | 'fill' | 'eyedropper' | 'select';
+export type ToolId = 'brush' | 'eraser' | 'fill' | 'eyedropper' | 'select' | 'place-object';
 
 /** Detail payload for editor-state-change events. */
 export interface EditorStateChangeDetail {

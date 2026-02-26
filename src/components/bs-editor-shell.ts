@@ -8,12 +8,20 @@ import { SelectionModel, type Stamp } from '../models/selection-model.js';
 import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
 import { saveToJson, loadFromJson, exportToTiledJson, exportToRawArrays } from '../models/serializer.js';
 import type { ToolId } from '../models/editor-store.js';
-import type { Command, CellEdit, AddLayerCommand, DeleteLayerCommand, ReorderLayerCommand, RenameLayerCommand } from '../models/tool-engine.js';
+import type {
+  Command, CellEdit, AddLayerCommand, DeleteLayerCommand,
+  ReorderLayerCommand, RenameLayerCommand, AddObjectCommand,
+  DeleteObjectCommand, MoveObjectCommand, EditObjectCommand,
+} from '../models/tool-engine.js';
 import { HistoryManager } from '../models/history-manager.js';
 import type { TileSizeCandidate } from '../workers/tile-detector-wrapper.js';
 import type { ImportImageDetail, ImportConfirmDetail } from './bs-import-dialog.js';
-import type { ViewportChangeDetail, CellHoverDetail, EyedropDetail } from './bs-map-canvas.js';
+import type {
+  ViewportChangeDetail, CellHoverDetail, EyedropDetail,
+  ObjectPlaceDetail, ObjectSelectDetail, ObjectMoveDetail, ObjectResizeDetail,
+} from './bs-map-canvas.js';
 import type { StampSelectDetail } from './bs-tileset-panel.js';
+import type { ObjectEditDetail, ObjectDeleteDetail } from './bs-object-properties.js';
 import type {
   LayerSelectDetail,
   LayerDeleteDetail,
@@ -25,11 +33,18 @@ import type {
 } from './bs-layer-panel.js';
 import {
   type Layer,
+  type MapObject,
+  type ObjectLayer,
   createTileLayer,
+  createObjectLayer,
   setLayerName,
   setLayerVisible,
   setLayerOpacity,
   setLayerLocked,
+  addObject,
+  removeObject,
+  updateObject,
+  nextObjectId,
 } from '../models/layer-model.js';
 
 // Register editor icons
@@ -49,6 +64,8 @@ BhIcon.register('eye', '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
 BhIcon.register('eye-slash', '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>');
 BhIcon.register('lock', '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>');
 BhIcon.register('eyedropper', '<path d="M20.71 5.63l-2.34-2.34a1 1 0 0 0-1.41 0l-3.12 3.12-1.41-1.42-1.42 1.42 1.41 1.41-6.6 6.6A2 2 0 0 0 5 16v3h3a2 2 0 0 0 1.42-.59l6.6-6.6 1.41 1.42 1.42-1.42-1.42-1.41 3.12-3.12a1 1 0 0 0 0-1.65z"/><line x1="5" y1="21" x2="10" y2="21"/>');
+BhIcon.register('map-pin', '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>');
+BhIcon.register('square-dashed', '<rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke-dasharray="4 2"/>');
 
 
 // Import bh-01 shell components (side-effect registrations)
@@ -56,6 +73,7 @@ import '@bruk-io/bh-01';
 
 // Import backsplash components (side-effect registrations)
 import './bs-layer-panel.js';
+import './bs-object-properties.js';
 
 type PanelId = 'layers' | 'tilesets' | '';
 
@@ -115,6 +133,7 @@ export class BsEditorShell extends BaseElement {
   @state() private _projectName = 'Untitled Map';
   @state() private _hasUnsavedChanges = false;
   @state() private _renderVersion = 0;
+  @state() private _selectedObjectId = -1;
 
   private _store = new EditorStore();
   private _fileHandle: FileSystemFileHandle | null = null;
@@ -122,9 +141,25 @@ export class BsEditorShell extends BaseElement {
   private _detector = new TileDetectorWrapper();
   private _history = new HistoryManager();
   private _strokeEdits: CellEdit[] = [];
+  /** Snapshot of object before drag starts (for undo). */
+  private _dragObjectSnapshot: MapObject | null = null;
 
   private get _sidebarOpen() {
     return this._panel !== '';
+  }
+
+  /** Whether the active layer is an object layer. */
+  private get _isObjectLayerActive(): boolean {
+    const layer = this._tilemap?.getLayer(this._activeLayerIndex);
+    return layer?.type === 'object';
+  }
+
+  /** Get the selected MapObject, or null. */
+  private get _selectedObject(): MapObject | null {
+    if (this._selectedObjectId < 0 || !this._tilemap) return null;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return null;
+    return (layer as ObjectLayer).objects.find(o => o.id === this._selectedObjectId) ?? null;
   }
 
   override connectedCallback(): void {
@@ -209,6 +244,12 @@ export class BsEditorShell extends BaseElement {
               <bh-button size="sm" variant=${this._activeTool === 'eyedropper' ? 'primary' : 'ghost'} icon-only label="Eyedropper" @click=${() => this._setTool('eyedropper')}>
                 <bh-icon slot="prefix" name="eyedropper"></bh-icon>
               </bh-button>
+              ${this._isObjectLayerActive ? html`
+                <bh-divider vertical spacing="sm"></bh-divider>
+                <bh-button size="sm" variant=${this._activeTool === 'place-object' ? 'primary' : 'ghost'} icon-only label="Place Object" @click=${() => this._setTool('place-object')}>
+                  <bh-icon slot="prefix" name="map-pin"></bh-icon>
+                </bh-button>
+              ` : nothing}
               <bh-divider vertical spacing="sm"></bh-divider>
               <bh-button size="sm" variant="ghost" icon-only label="Undo" ?disabled=${!this._history.canUndo} @click=${this._onUndo}>
                 <bh-icon slot="prefix" name="arrow-counter-clockwise"></bh-icon>
@@ -245,12 +286,19 @@ export class BsEditorShell extends BaseElement {
                   .selectedGid=${this._selectedGid}
                   .stamp=${this._stamp}
                   .renderVersion=${this._renderVersion}
+                  .selectedObjectId=${this._selectedObjectId}
+                  ?object-mode=${this._isObjectLayerActive}
                   show-grid
                   @bs-viewport-change=${this._onViewportChange}
                   @bs-cell-hover=${this._onCellHover}
                   @bs-paint=${this._onPaint}
                   @bs-paint-end=${this._onPaintEnd}
                   @bs-eyedrop=${this._onEyedrop}
+                  @bs-object-place=${this._onObjectPlace}
+                  @bs-object-select=${this._onObjectSelect}
+                  @bs-object-move=${this._onObjectMove}
+                  @bs-object-resize=${this._onObjectResize}
+                  @bs-object-drag-end=${this._onObjectDragEnd}
                 ></bs-map-canvas>`
               : html`<bh-center intrinsic>
                   <bh-stack gap="xs" align="center">
@@ -284,7 +332,17 @@ export class BsEditorShell extends BaseElement {
     const layers = this._tilemap ? [...this._tilemap.layers] : [];
     return html`
       <bh-sidebar-panel style="height:100%">
-        <bh-panel-header slot="header" label="Layers"></bh-panel-header>
+        <bh-panel-header slot="header" label="Layers">
+          <bh-button
+            slot="end"
+            variant="ghost"
+            size="sm"
+            label="Add Object Layer"
+            @click=${this._onObjectLayerAdd}
+          >
+            <bh-icon slot="prefix" name="map-pin" size="sm"></bh-icon>
+          </bh-button>
+        </bh-panel-header>
         <bs-layer-panel
           .layers=${layers}
           .activeLayerIndex=${this._activeLayerIndex}
@@ -297,6 +355,14 @@ export class BsEditorShell extends BaseElement {
           @bs-layer-lock=${this._onLayerLock}
           @bs-layer-reorder=${this._onLayerReorder}
         ></bs-layer-panel>
+        ${this._isObjectLayerActive && this._selectedObject ? html`
+          <bh-divider></bh-divider>
+          <bs-object-properties
+            .object=${this._selectedObject}
+            @bs-object-edit=${this._onObjectEdit}
+            @bs-object-delete=${this._onObjectDeleteFromPanel}
+          ></bs-object-properties>
+        ` : nothing}
       </bh-sidebar-panel>
     `;
   }
@@ -499,6 +565,11 @@ export class BsEditorShell extends BaseElement {
       case 'i':
         this._setTool('eyedropper');
         break;
+      case 'o':
+        if (this._isObjectLayerActive) {
+          this._setTool('place-object');
+        }
+        break;
     }
   };
 
@@ -510,6 +581,14 @@ export class BsEditorShell extends BaseElement {
 
   private _onLayerSelect(e: CustomEvent<LayerSelectDetail>): void {
     this._activeLayerIndex = e.detail.index;
+    this._selectedObjectId = -1;
+    // Auto-switch to place-object tool when selecting an object layer
+    const layer = this._tilemap?.getLayer(e.detail.index);
+    if (layer?.type === 'object' && this._activeTool !== 'place-object') {
+      this._setTool('place-object');
+    } else if (layer?.type === 'tile' && this._activeTool === 'place-object') {
+      this._setTool('brush');
+    }
   }
 
   private _onLayerAdd(): void {
@@ -592,6 +671,182 @@ export class BsEditorShell extends BaseElement {
     if (this._activeLayerIndex === fromIndex) {
       this._activeLayerIndex = toIndex;
     }
+    this._renderVersion++;
+    this.requestUpdate();
+  }
+
+  // ── Object layer handlers ──────────────────────────────────────
+
+  private _onObjectLayerAdd(): void {
+    if (!this._tilemap) return;
+    const count = this._tilemap.layers.length;
+    const layer = createObjectLayer(`Object ${count + 1}`, count);
+    this._tilemap.addLayer(layer);
+    const index = this._tilemap.layers.length - 1;
+    this._activeLayerIndex = index;
+    this._history.push({ type: 'add-layer', layer, layerIndex: index } satisfies AddLayerCommand);
+    this._setTool('place-object');
+    this._renderVersion++;
+    this.requestUpdate();
+  }
+
+  private _onObjectPlace(e: CustomEvent<ObjectPlaceDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return;
+
+    const { x, y, width, height } = e.detail;
+    const id = nextObjectId(layer as ObjectLayer);
+    const obj: MapObject = {
+      id,
+      name: '',
+      type: 'default',
+      x,
+      y,
+      width,
+      height,
+      properties: {},
+    };
+
+    const updated = addObject(layer as ObjectLayer, obj);
+    this._tilemap.replaceLayer(this._activeLayerIndex, updated);
+    this._selectedObjectId = id;
+    this._history.push({
+      type: 'add-object',
+      layerIndex: this._activeLayerIndex,
+      object: obj,
+    } satisfies AddObjectCommand);
+    this._hasUnsavedChanges = true;
+    this._renderVersion++;
+    this.requestUpdate();
+  }
+
+  private _onObjectSelect(e: CustomEvent<ObjectSelectDetail>): void {
+    this._selectedObjectId = e.detail.objectId;
+
+    // Take snapshot of selected object for undo if a drag starts
+    if (e.detail.objectId >= 0) {
+      this._dragObjectSnapshot = this._selectedObject ? { ...this._selectedObject } : null;
+    } else {
+      this._dragObjectSnapshot = null;
+    }
+    this.requestUpdate();
+  }
+
+  private _onObjectMove(e: CustomEvent<ObjectMoveDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return;
+
+    const obj = (layer as ObjectLayer).objects.find(o => o.id === e.detail.objectId);
+    if (!obj) return;
+
+    const moved: MapObject = { ...obj, x: e.detail.x, y: e.detail.y };
+    const updated = updateObject(layer as ObjectLayer, moved);
+    this._tilemap.replaceLayer(this._activeLayerIndex, updated);
+    this._hasUnsavedChanges = true;
+    this._renderVersion++;
+    this.requestUpdate();
+  }
+
+  private _onObjectResize(e: CustomEvent<ObjectResizeDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return;
+
+    const obj = (layer as ObjectLayer).objects.find(o => o.id === e.detail.objectId);
+    if (!obj) return;
+
+    const resized: MapObject = {
+      ...obj,
+      x: e.detail.x,
+      y: e.detail.y,
+      width: e.detail.width,
+      height: e.detail.height,
+    };
+    const updated = updateObject(layer as ObjectLayer, resized);
+    this._tilemap.replaceLayer(this._activeLayerIndex, updated);
+    this._hasUnsavedChanges = true;
+    this._renderVersion++;
+    this.requestUpdate();
+  }
+
+  private _onObjectDragEnd(): void {
+    // Push a move or edit command for undo
+    if (!this._dragObjectSnapshot || !this._tilemap) return;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return;
+
+    const current = (layer as ObjectLayer).objects.find(o => o.id === this._dragObjectSnapshot!.id);
+    if (!current) return;
+
+    // Only push if something actually changed
+    const old = this._dragObjectSnapshot;
+    if (old.x !== current.x || old.y !== current.y ||
+        old.width !== current.width || old.height !== current.height) {
+      this._history.push({
+        type: 'move-object',
+        layerIndex: this._activeLayerIndex,
+        objectId: old.id,
+        oldObject: old,
+        newObject: { ...current },
+      } satisfies MoveObjectCommand);
+    }
+
+    this._dragObjectSnapshot = null;
+  }
+
+  private _onObjectEdit(e: CustomEvent<ObjectEditDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return;
+
+    const obj = (layer as ObjectLayer).objects.find(o => o.id === e.detail.objectId);
+    if (!obj) return;
+
+    const oldObj = { ...obj };
+    const newObj: MapObject = {
+      ...obj,
+      name: e.detail.name,
+      type: e.detail.type,
+      x: e.detail.x,
+      y: e.detail.y,
+      width: e.detail.width,
+      height: e.detail.height,
+      properties: e.detail.properties,
+    };
+
+    const updated = updateObject(layer as ObjectLayer, newObj);
+    this._tilemap.replaceLayer(this._activeLayerIndex, updated);
+    this._history.push({
+      type: 'edit-object',
+      layerIndex: this._activeLayerIndex,
+      objectId: obj.id,
+      oldObject: oldObj,
+      newObject: newObj,
+    } satisfies EditObjectCommand);
+    this._hasUnsavedChanges = true;
+    this._renderVersion++;
+    this.requestUpdate();
+  }
+
+  private _onObjectDeleteFromPanel(e: CustomEvent<ObjectDeleteDetail>): void {
+    if (!this._tilemap) return;
+    const layer = this._tilemap.getLayer(this._activeLayerIndex);
+    if (!layer || layer.type !== 'object') return;
+
+    const obj = (layer as ObjectLayer).objects.find(o => o.id === e.detail.objectId);
+    if (!obj) return;
+
+    const updated = removeObject(layer as ObjectLayer, obj.id);
+    this._tilemap.replaceLayer(this._activeLayerIndex, updated);
+    this._selectedObjectId = -1;
+    this._history.push({
+      type: 'delete-object',
+      layerIndex: this._activeLayerIndex,
+      object: { ...obj },
+    } satisfies DeleteObjectCommand);
+    this._hasUnsavedChanges = true;
     this._renderVersion++;
     this.requestUpdate();
   }

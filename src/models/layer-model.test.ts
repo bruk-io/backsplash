@@ -19,6 +19,11 @@ import {
   setLayerOpacity,
   setLayerLocked,
   setLayerZOrder,
+  addObject,
+  removeObject,
+  updateObject,
+  nextObjectId,
+  type MapObject,
 } from './layer-model.js';
 
 // ── Cell read/write ──────────────────────────────────────────────────
@@ -291,5 +296,102 @@ describe('Layer property setters', () => {
     const renamed = setLayerName(layer, 'renamed');
     // Spread copies the reference to the same Uint32Array
     expect(getCell(renamed, 0, 0, 2)).toBe(99);
+  });
+});
+
+// ── Object layer mutations ──────────────────────────────────────────
+
+const makeObj = (overrides: Partial<MapObject> = {}): MapObject => ({
+  id: 1,
+  name: 'spawn',
+  type: 'point',
+  x: 10,
+  y: 20,
+  width: 0,
+  height: 0,
+  properties: {},
+  ...overrides,
+});
+
+describe('addObject', () => {
+  it('appends an object to the layer', () => {
+    const layer = createObjectLayer('Objects');
+    const obj = makeObj();
+    const updated = addObject(layer, obj);
+    expect(updated.objects).toHaveLength(1);
+    expect(updated.objects[0]).toBe(obj);
+  });
+
+  it('returns a new layer (immutable)', () => {
+    const layer = createObjectLayer('Objects');
+    const updated = addObject(layer, makeObj());
+    expect(updated).not.toBe(layer);
+    expect(layer.objects).toHaveLength(0);
+  });
+
+  it('preserves existing objects', () => {
+    const layer = createObjectLayer('Objects');
+    const a = makeObj({ id: 1, name: 'A' });
+    const b = makeObj({ id: 2, name: 'B' });
+    const withA = addObject(layer, a);
+    const withBoth = addObject(withA, b);
+    expect(withBoth.objects).toHaveLength(2);
+    expect(withBoth.objects[0].name).toBe('A');
+    expect(withBoth.objects[1].name).toBe('B');
+  });
+});
+
+describe('removeObject', () => {
+  it('removes an object by ID', () => {
+    const layer = addObject(createObjectLayer('Objects'), makeObj({ id: 1 }));
+    const updated = removeObject(layer, 1);
+    expect(updated.objects).toHaveLength(0);
+  });
+
+  it('does not remove other objects', () => {
+    let layer = createObjectLayer('Objects');
+    layer = addObject(layer, makeObj({ id: 1, name: 'A' }));
+    layer = addObject(layer, makeObj({ id: 2, name: 'B' }));
+    const updated = removeObject(layer, 1);
+    expect(updated.objects).toHaveLength(1);
+    expect(updated.objects[0].id).toBe(2);
+  });
+
+  it('returns a new layer (immutable)', () => {
+    const layer = addObject(createObjectLayer('Objects'), makeObj());
+    const updated = removeObject(layer, 1);
+    expect(updated).not.toBe(layer);
+    expect(layer.objects).toHaveLength(1);
+  });
+});
+
+describe('updateObject', () => {
+  it('replaces an object by ID', () => {
+    const layer = addObject(createObjectLayer('Objects'), makeObj({ id: 1, x: 10 }));
+    const moved = { ...makeObj({ id: 1 }), x: 50 };
+    const updated = updateObject(layer, moved);
+    expect(updated.objects[0].x).toBe(50);
+  });
+
+  it('does not modify other objects', () => {
+    let layer = createObjectLayer('Objects');
+    layer = addObject(layer, makeObj({ id: 1, name: 'A' }));
+    layer = addObject(layer, makeObj({ id: 2, name: 'B' }));
+    const updated = updateObject(layer, { ...makeObj({ id: 1 }), name: 'A-edited' });
+    expect(updated.objects[0].name).toBe('A-edited');
+    expect(updated.objects[1].name).toBe('B');
+  });
+});
+
+describe('nextObjectId', () => {
+  it('returns 1 for empty layer', () => {
+    expect(nextObjectId(createObjectLayer('Objects'))).toBe(1);
+  });
+
+  it('returns max ID + 1', () => {
+    let layer = createObjectLayer('Objects');
+    layer = addObject(layer, makeObj({ id: 5 }));
+    layer = addObject(layer, makeObj({ id: 3 }));
+    expect(nextObjectId(layer)).toBe(6);
   });
 });

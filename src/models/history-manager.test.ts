@@ -11,9 +11,19 @@ import type {
   DeleteLayerCommand,
   ReorderLayerCommand,
   RenameLayerCommand,
+  AddObjectCommand,
+  DeleteObjectCommand,
+  MoveObjectCommand,
+  EditObjectCommand,
 } from './tool-engine.js';
 import { TilemapModel } from './tilemap-model.js';
-import { createTileLayer, createObjectLayer } from './layer-model.js';
+import {
+  createTileLayer,
+  createObjectLayer,
+  addObject,
+  type MapObject,
+  type ObjectLayer,
+} from './layer-model.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -750,5 +760,230 @@ describe('HistoryManager — rapid undo/redo cycling', () => {
     expect(hm.undoCount).toBe(0);
     expect(hm.redoCount).toBe(1); // last undo leaves 1 on redo
     expect(hm.undoBytes).toBe(0);
+  });
+});
+
+// ── Object command helpers ───────────────────────────────────────────
+
+const testObj = (overrides: Partial<MapObject> = {}): MapObject => ({
+  id: 1,
+  name: 'spawn',
+  type: 'point',
+  x: 10,
+  y: 20,
+  width: 0,
+  height: 0,
+  properties: {},
+  ...overrides,
+});
+
+function tilemapWithObjectLayer(): TilemapModel {
+  const tm = new TilemapModel({ width: 4, height: 4, tileWidth: 16, tileHeight: 16 });
+  tm.addLayer(createObjectLayer('Objects'));
+  return tm;
+}
+
+// ── estimateCommandBytes — object commands ───────────────────────────
+
+describe('estimateCommandBytes — object commands', () => {
+  it('add-object returns 200', () => {
+    const cmd: AddObjectCommand = { type: 'add-object', layerIndex: 1, object: testObj() };
+    expect(estimateCommandBytes(cmd)).toBe(200);
+  });
+
+  it('delete-object returns 200', () => {
+    const cmd: DeleteObjectCommand = { type: 'delete-object', layerIndex: 1, object: testObj() };
+    expect(estimateCommandBytes(cmd)).toBe(200);
+  });
+
+  it('move-object returns 400', () => {
+    const cmd: MoveObjectCommand = {
+      type: 'move-object', layerIndex: 1, objectId: 1,
+      oldObject: testObj(), newObject: testObj({ x: 50 }),
+    };
+    expect(estimateCommandBytes(cmd)).toBe(400);
+  });
+
+  it('edit-object returns 400', () => {
+    const cmd: EditObjectCommand = {
+      type: 'edit-object', layerIndex: 1, objectId: 1,
+      oldObject: testObj(), newObject: testObj({ name: 'edited' }),
+    };
+    expect(estimateCommandBytes(cmd)).toBe(400);
+  });
+});
+
+// ── AddObjectCommand undo/redo ───────────────────────────────────────
+
+describe('HistoryManager — add-object undo/redo', () => {
+  it('undo removes the added object', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const obj = testObj();
+
+    // Manually add the object to layer 1
+    const layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, obj));
+    expect((tilemap.getLayer(1) as ObjectLayer).objects).toHaveLength(1);
+
+    const cmd: AddObjectCommand = { type: 'add-object', layerIndex: 1, object: obj };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect((tilemap.getLayer(1) as ObjectLayer).objects).toHaveLength(0);
+  });
+
+  it('redo re-adds the object', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const obj = testObj();
+
+    const layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, obj));
+
+    const cmd: AddObjectCommand = { type: 'add-object', layerIndex: 1, object: obj };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    hm.redo(tilemap);
+
+    const objects = (tilemap.getLayer(1) as ObjectLayer).objects;
+    expect(objects).toHaveLength(1);
+    expect(objects[0].id).toBe(1);
+  });
+});
+
+// ── DeleteObjectCommand undo/redo ────────────────────────────────────
+
+describe('HistoryManager — delete-object undo/redo', () => {
+  it('undo re-adds the deleted object', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const obj = testObj();
+
+    // Add then remove the object
+    let layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, obj));
+    layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, { ...layer, objects: layer.objects.filter(o => o.id !== 1) });
+    expect((tilemap.getLayer(1) as ObjectLayer).objects).toHaveLength(0);
+
+    const cmd: DeleteObjectCommand = { type: 'delete-object', layerIndex: 1, object: obj };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    expect((tilemap.getLayer(1) as ObjectLayer).objects).toHaveLength(1);
+    expect((tilemap.getLayer(1) as ObjectLayer).objects[0].name).toBe('spawn');
+  });
+
+  it('redo removes the object again', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const obj = testObj();
+
+    let layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, obj));
+    layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, { ...layer, objects: [] });
+
+    const cmd: DeleteObjectCommand = { type: 'delete-object', layerIndex: 1, object: obj };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    expect((tilemap.getLayer(1) as ObjectLayer).objects).toHaveLength(1);
+
+    hm.redo(tilemap);
+    expect((tilemap.getLayer(1) as ObjectLayer).objects).toHaveLength(0);
+  });
+});
+
+// ── MoveObjectCommand undo/redo ──────────────────────────────────────
+
+describe('HistoryManager — move-object undo/redo', () => {
+  it('undo restores original position', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const oldObj = testObj({ x: 10, y: 20 });
+    const newObj = testObj({ x: 50, y: 60 });
+
+    // Set up the object at the moved position
+    const layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, newObj));
+
+    const cmd: MoveObjectCommand = {
+      type: 'move-object', layerIndex: 1, objectId: 1,
+      oldObject: oldObj, newObject: newObj,
+    };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    const obj = (tilemap.getLayer(1) as ObjectLayer).objects[0];
+    expect(obj.x).toBe(10);
+    expect(obj.y).toBe(20);
+  });
+
+  it('redo re-applies the move', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const oldObj = testObj({ x: 10, y: 20 });
+    const newObj = testObj({ x: 50, y: 60 });
+
+    const layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, newObj));
+
+    const cmd: MoveObjectCommand = {
+      type: 'move-object', layerIndex: 1, objectId: 1,
+      oldObject: oldObj, newObject: newObj,
+    };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    hm.redo(tilemap);
+
+    const obj = (tilemap.getLayer(1) as ObjectLayer).objects[0];
+    expect(obj.x).toBe(50);
+    expect(obj.y).toBe(60);
+  });
+});
+
+// ── EditObjectCommand undo/redo ──────────────────────────────────────
+
+describe('HistoryManager — edit-object undo/redo', () => {
+  it('undo restores original properties', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const oldObj = testObj({ name: 'spawn', type: 'point' });
+    const newObj = testObj({ name: 'exit', type: 'trigger' });
+
+    const layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, newObj));
+
+    const cmd: EditObjectCommand = {
+      type: 'edit-object', layerIndex: 1, objectId: 1,
+      oldObject: oldObj, newObject: newObj,
+    };
+    hm.push(cmd);
+    hm.undo(tilemap);
+
+    const obj = (tilemap.getLayer(1) as ObjectLayer).objects[0];
+    expect(obj.name).toBe('spawn');
+    expect(obj.type).toBe('point');
+  });
+
+  it('redo re-applies the edit', () => {
+    const tilemap = tilemapWithObjectLayer();
+    const hm = new HistoryManager();
+    const oldObj = testObj({ name: 'spawn' });
+    const newObj = testObj({ name: 'exit' });
+
+    const layer = tilemap.getLayer(1) as ObjectLayer;
+    tilemap.replaceLayer(1, addObject(layer, newObj));
+
+    const cmd: EditObjectCommand = {
+      type: 'edit-object', layerIndex: 1, objectId: 1,
+      oldObject: oldObj, newObject: newObj,
+    };
+    hm.push(cmd);
+    hm.undo(tilemap);
+    hm.redo(tilemap);
+
+    expect((tilemap.getLayer(1) as ObjectLayer).objects[0].name).toBe('exit');
   });
 });

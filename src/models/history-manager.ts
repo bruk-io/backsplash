@@ -7,8 +7,12 @@ import type {
   DeleteLayerCommand,
   ReorderLayerCommand,
   RenameLayerCommand,
+  AddObjectCommand,
+  DeleteObjectCommand,
+  MoveObjectCommand,
+  EditObjectCommand,
 } from './tool-engine.js';
-import { setLayerName } from './layer-model.js';
+import { setLayerName, addObject, removeObject, updateObject } from './layer-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -43,6 +47,12 @@ export function estimateCommandBytes(command: Command): number {
       return 16; // 2 numbers × 4 bytes each (generous estimate)
     case 'rename-layer':
       return command.oldName.length + command.newName.length;
+    case 'add-object':
+    case 'delete-object':
+      return 200; // Object metadata estimate
+    case 'move-object':
+    case 'edit-object':
+      return 400; // Old + new object metadata estimate
   }
 }
 
@@ -124,6 +134,42 @@ function applyRenameLayerRedo(tilemap: TilemapModel, command: RenameLayerCommand
   tilemap.replaceLayer(command.layerIndex, setLayerName(layer, command.newName));
 }
 
+function applyAddObjectUndo(tilemap: TilemapModel, command: AddObjectCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer || layer.type !== 'object') return;
+  tilemap.replaceLayer(command.layerIndex, removeObject(layer, command.object.id));
+}
+
+function applyAddObjectRedo(tilemap: TilemapModel, command: AddObjectCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer || layer.type !== 'object') return;
+  tilemap.replaceLayer(command.layerIndex, addObject(layer, command.object));
+}
+
+function applyDeleteObjectUndo(tilemap: TilemapModel, command: DeleteObjectCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer || layer.type !== 'object') return;
+  tilemap.replaceLayer(command.layerIndex, addObject(layer, command.object));
+}
+
+function applyDeleteObjectRedo(tilemap: TilemapModel, command: DeleteObjectCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer || layer.type !== 'object') return;
+  tilemap.replaceLayer(command.layerIndex, removeObject(layer, command.object.id));
+}
+
+function applyObjectUpdateUndo(tilemap: TilemapModel, command: MoveObjectCommand | EditObjectCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer || layer.type !== 'object') return;
+  tilemap.replaceLayer(command.layerIndex, updateObject(layer, command.oldObject));
+}
+
+function applyObjectUpdateRedo(tilemap: TilemapModel, command: MoveObjectCommand | EditObjectCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer || layer.type !== 'object') return;
+  tilemap.replaceLayer(command.layerIndex, updateObject(layer, command.newObject));
+}
+
 function applyUndo(tilemap: TilemapModel, command: Command): void {
   switch (command.type) {
     case 'paint':
@@ -140,6 +186,16 @@ function applyUndo(tilemap: TilemapModel, command: Command): void {
       break;
     case 'rename-layer':
       applyRenameLayerUndo(tilemap, command);
+      break;
+    case 'add-object':
+      applyAddObjectUndo(tilemap, command);
+      break;
+    case 'delete-object':
+      applyDeleteObjectUndo(tilemap, command);
+      break;
+    case 'move-object':
+    case 'edit-object':
+      applyObjectUpdateUndo(tilemap, command);
       break;
   }
 }
@@ -160,6 +216,16 @@ function applyRedo(tilemap: TilemapModel, command: Command): void {
       break;
     case 'rename-layer':
       applyRenameLayerRedo(tilemap, command);
+      break;
+    case 'add-object':
+      applyAddObjectRedo(tilemap, command);
+      break;
+    case 'delete-object':
+      applyDeleteObjectRedo(tilemap, command);
+      break;
+    case 'move-object':
+    case 'edit-object':
+      applyObjectUpdateRedo(tilemap, command);
       break;
   }
 }
