@@ -5,7 +5,7 @@ import { BaseElement } from '@bruk-io/bh-01';
 @customElement('bs-map-canvas')
 export class BsMapCanvas extends BaseElement {
   static override styles = [
-    BaseElement.styles,
+    ...([BaseElement.styles].flat()),
     css`
       :host {
         display: flex;
