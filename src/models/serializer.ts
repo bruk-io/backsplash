@@ -136,6 +136,12 @@ function serializeLayer(layer: Layer): LayerSchema {
  * or user re-import) since the JSON contains no pixel data.
  */
 export function loadFromSchema(schema: ProjectSchema): TilemapModel {
+  if (!schema || typeof schema !== 'object') {
+    throw new Error('Invalid project schema: expected an object');
+  }
+  if (!schema.map || !schema.layers || !schema.tilesets) {
+    throw new Error('Invalid project schema: missing required fields (map, layers, tilesets)');
+  }
   if (schema.version > SCHEMA_VERSION) {
     throw new Error(
       `Unsupported schema version ${schema.version} (max supported: ${SCHEMA_VERSION})`,

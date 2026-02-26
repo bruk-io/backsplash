@@ -193,6 +193,15 @@ describe('loadFromSchema', () => {
     expect(map.tilesets[0].image).toBeNull();
   });
 
+  it('throws on structurally invalid JSON (empty object)', () => {
+    expect(() => loadFromJson('{}')).toThrow('Invalid project schema');
+  });
+
+  it('throws on JSON missing layers key', () => {
+    const partial = JSON.stringify({ version: 1, map: { width: 4, height: 3, tileWidth: 16, tileHeight: 16 }, tilesets: [] });
+    expect(() => loadFromJson(partial)).toThrow('Invalid project schema');
+  });
+
   it('throws on unsupported schema version', () => {
     const schema: ProjectSchema = {
       version: 999,
@@ -282,6 +291,40 @@ describe('save → load round-trip', () => {
     expect(loaded.tilesets[0].name).toBe('terrain');
     expect(loaded.tilesets[0].firstGid).toBe(1);
     expect(loaded.tilesets[0].tileWidth).toBe(16);
+  });
+
+  it('round-trips tileset with margin and spacing without changing tileCount', () => {
+    const map = makeMap();
+    const ts = new TilesetModel({
+      name: 'spritesheet',
+      image: null,
+      tileWidth: 16,
+      tileHeight: 16,
+      imageWidth: 128,
+      imageHeight: 64,
+      margin: 1,
+      spacing: 2,
+      firstGid: 1,
+    });
+    map.addTileset(ts);
+
+    const loaded = loadFromJson(saveToJson(map));
+
+    expect(loaded.tilesets[0].tileCount).toBe(ts.tileCount);
+    expect(loaded.tilesets[0].columns).toBe(ts.columns);
+    expect(loaded.tilesets[0].rows).toBe(ts.rows);
+  });
+
+  it('preserves flip-flagged GIDs through round-trip', () => {
+    const FLIP_H = 0x80000000;
+    const map = makeMap({ width: 2, height: 1 });
+    map.setCellGid(0, 0, 0, FLIP_H | 5);
+    map.setCellGid(0, 1, 0, 5);
+
+    const loaded = loadFromJson(saveToJson(map));
+
+    expect(loaded.getCellGid(0, 0, 0)).toBe((FLIP_H | 5) >>> 0);
+    expect(loaded.getCellGid(0, 1, 0)).toBe(5);
   });
 
   it('preserves all GIDs byte-for-byte through round-trip', () => {
