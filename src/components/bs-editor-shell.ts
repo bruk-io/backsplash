@@ -6,6 +6,7 @@ import { TilesetModel } from '../models/tileset-model.js';
 import { EditorStore } from '../models/editor-store.js';
 import { SelectionModel, type Stamp } from '../models/selection-model.js';
 import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
+import { saveToJson, loadFromJson, exportToTiledJson, exportToRawArrays } from '../models/serializer.js';
 import type { ToolId } from '../models/editor-store.js';
 import type { Command, CellEdit, AddLayerCommand, DeleteLayerCommand, ReorderLayerCommand, RenameLayerCommand } from '../models/tool-engine.js';
 import { HistoryManager } from '../models/history-manager.js';
@@ -42,6 +43,8 @@ BhIcon.register('arrow-counter-clockwise', '<polyline points="1 4 1 10 7 10"/><p
 BhIcon.register('arrow-clockwise', '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>');
 BhIcon.register('floppy-disk', '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>');
 BhIcon.register('download', '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>');
+BhIcon.register('folder-open', '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>');
+BhIcon.register('file-plus', '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>');
 BhIcon.register('eye', '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>');
 BhIcon.register('eye-slash', '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>');
 BhIcon.register('lock', '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>');
@@ -109,8 +112,11 @@ export class BsEditorShell extends BaseElement {
   @state() private _activeTool: ToolId = 'brush';
   @state() private _activeLayerIndex = 0;
   @state() private _stamp: Stamp | null = null;
+  @state() private _projectName = 'Untitled Map';
+  @state() private _hasUnsavedChanges = false;
 
   private _store = new EditorStore();
+  private _fileHandle: FileSystemFileHandle | null = null;
   private _selection = new SelectionModel();
   private _detector = new TileDetectorWrapper();
   private _history = new HistoryManager();
@@ -211,13 +217,19 @@ export class BsEditorShell extends BaseElement {
               </bh-button>
             </bh-cluster>
 
-            <bh-text variant="small">Untitled Map</bh-text>
+            <bh-text variant="small">${this._projectName}${this._hasUnsavedChanges ? ' *' : ''}</bh-text>
 
             <bh-cluster slot="end" gap="xs" nowrap>
-              <bh-button size="sm" variant="ghost" icon-only label="Save">
+              <bh-button size="sm" variant="ghost" icon-only label="New" @click=${this._onNew}>
+                <bh-icon slot="prefix" name="file-plus"></bh-icon>
+              </bh-button>
+              <bh-button size="sm" variant="ghost" icon-only label="Open" @click=${this._onOpen}>
+                <bh-icon slot="prefix" name="folder-open"></bh-icon>
+              </bh-button>
+              <bh-button size="sm" variant="ghost" icon-only label="Save" @click=${this._onSave}>
                 <bh-icon slot="prefix" name="floppy-disk"></bh-icon>
               </bh-button>
-              <bh-button size="sm" variant="ghost" icon-only label="Export">
+              <bh-button size="sm" variant="ghost" icon-only label="Export" @click=${this._onExport}>
                 <bh-icon slot="prefix" name="download"></bh-icon>
               </bh-button>
             </bh-cluster>
@@ -417,6 +429,7 @@ export class BsEditorShell extends BaseElement {
     if (e.detail.command.type === 'paint') {
       this._strokeEdits.push(...e.detail.command.edits);
     }
+    this._hasUnsavedChanges = true;
     this.requestUpdate();
   }
 
@@ -445,7 +458,7 @@ export class BsEditorShell extends BaseElement {
   private _onKeyDown = (e: KeyboardEvent): void => {
     const mod = e.metaKey || e.ctrlKey;
 
-    // Undo/redo require modifier key
+    // Modifier key shortcuts
     if (mod) {
       if (e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -453,6 +466,12 @@ export class BsEditorShell extends BaseElement {
       } else if (e.key === 'z' && e.shiftKey) {
         e.preventDefault();
         this._onRedo();
+      } else if (e.key === 's') {
+        e.preventDefault();
+        this._onSave();
+      } else if (e.key === 'o') {
+        e.preventDefault();
+        this._onOpen();
       }
       return;
     }
@@ -568,6 +587,106 @@ export class BsEditorShell extends BaseElement {
       this._activeLayerIndex = toIndex;
     }
     this.requestUpdate();
+  }
+
+  // ── Save / Load / Export handlers ──────────────────────────────
+
+  private async _onSave(): Promise<void> {
+    if (!this._tilemap) return;
+
+    try {
+      // Re-use existing handle or prompt for a new one
+      if (!this._fileHandle) {
+        this._fileHandle = await window.showSaveFilePicker({
+          suggestedName: `${this._projectName}.backsplash`,
+          types: [{
+            description: 'Backsplash Project',
+            accept: { 'application/json': ['.backsplash'] },
+          }],
+        });
+        // Update project name from chosen filename
+        const name = this._fileHandle.name.replace(/\.backsplash$/, '');
+        this._projectName = name;
+      }
+
+      const json = saveToJson(this._tilemap);
+      const writable = await this._fileHandle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      this._hasUnsavedChanges = false;
+    } catch (e) {
+      // User cancelled the file picker — silently ignore
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      throw e;
+    }
+  }
+
+  private async _onOpen(): Promise<void> {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{
+          description: 'Backsplash Project',
+          accept: { 'application/json': ['.backsplash'] },
+        }],
+      });
+
+      const file = await handle.getFile();
+      const json = await file.text();
+      const tilemap = loadFromJson(json);
+
+      this._fileHandle = handle;
+      this._projectName = handle.name.replace(/\.backsplash$/, '');
+      this._tilemap = tilemap;
+      this._store.tilemap = tilemap;
+      this._activeLayerIndex = 0;
+      this._selectedGid = 0;
+      this._stamp = null;
+      this._history = new HistoryManager();
+      this._hasUnsavedChanges = false;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      throw e;
+    }
+  }
+
+  private async _onExport(): Promise<void> {
+    if (!this._tilemap) return;
+
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: `${this._projectName}.json`,
+        types: [
+          { description: 'Tiled JSON', accept: { 'application/json': ['.json'] } },
+          { description: 'Raw Arrays JSON', accept: { 'application/json': ['.json'] } },
+        ],
+      });
+
+      // Use the filename to infer format: if it contains "raw" use raw, otherwise Tiled
+      const filename = handle.name.toLowerCase();
+      const json = filename.includes('raw')
+        ? exportToRawArrays(this._tilemap)
+        : exportToTiledJson(this._tilemap);
+
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      throw e;
+    }
+  }
+
+  private _onNew(): void {
+    this._tilemap = null;
+    this._fileHandle = null;
+    this._projectName = 'Untitled Map';
+    this._selectedGid = 0;
+    this._stamp = null;
+    this._activeLayerIndex = 0;
+    this._activeTilesetIndex = 0;
+    this._history = new HistoryManager();
+    this._hasUnsavedChanges = false;
+    this._initDemoTilemap();
   }
 
   private _replaceLayer(index: number, layer: Layer): void {
