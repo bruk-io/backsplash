@@ -165,13 +165,14 @@ views {
       '''
     }
 
-    // User confirms, tileset is created
+    // User confirms — shell handles bs-import-confirm event
     gamedev -> backsplash.editorApp.importDialog 'confirms tile size'
-    backsplash.editorApp.importDialog -> backsplash.editorApp.tilesetModel 'creates tileset from confirmed grid'
+    backsplash.editorApp.importDialog -> backsplash.editorApp.tilesetModel 'shell creates tileset on bs-import-confirm'
 
-    // Store notifies UI
-    backsplash.editorApp.tilesetModel -> backsplash.editorApp.editorStore 'registers new tileset'
-    backsplash.editorApp.editorStore -> backsplash.editorApp.tilesetPanel 'emits updated tileset list'
+    // Shell adds tileset to tilemap and triggers Lit re-render;
+    // tilesetPanel receives updated tilesets via props
+    backsplash.editorApp.tilesetModel -> backsplash.editorApp.tilemapModel 'shell calls addTileset'
+    backsplash.editorApp.tilesetPanel -> backsplash.editorApp.tilesetModel 'reads updated tilesets via props'
   }
 
   // ── Flow 4: Stamp Selection (PLANNED — M6) ───────────────────
