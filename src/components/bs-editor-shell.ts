@@ -4,7 +4,7 @@ import { BaseElement, BhIcon } from '@bruk-io/bh-01';
 import { TilemapModel } from '../models/tilemap-model.js';
 import { TilesetModel } from '../models/tileset-model.js';
 import { EditorStore } from '../models/editor-store.js';
-import { SelectionModel } from '../models/selection-model.js';
+import { SelectionModel, type Stamp } from '../models/selection-model.js';
 import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
 import type { ToolId } from '../models/editor-store.js';
 import type { Command, CellEdit, AddLayerCommand, DeleteLayerCommand, ReorderLayerCommand, RenameLayerCommand } from '../models/tool-engine.js';
@@ -12,6 +12,7 @@ import { HistoryManager } from '../models/history-manager.js';
 import type { TileSizeCandidate } from '../workers/tile-detector-wrapper.js';
 import type { ImportImageDetail, ImportConfirmDetail } from './bs-import-dialog.js';
 import type { ViewportChangeDetail, CellHoverDetail, EyedropDetail } from './bs-map-canvas.js';
+import type { StampSelectDetail } from './bs-tileset-panel.js';
 import type {
   LayerSelectDetail,
   LayerDeleteDetail,
@@ -107,6 +108,7 @@ export class BsEditorShell extends BaseElement {
   @state() private _activeTilesetIndex = 0;
   @state() private _activeTool: ToolId = 'brush';
   @state() private _activeLayerIndex = 0;
+  @state() private _stamp: Stamp | null = null;
 
   private _store = new EditorStore();
   private _selection = new SelectionModel();
@@ -157,6 +159,7 @@ export class BsEditorShell extends BaseElement {
     const { gid } = e.detail;
     this._selectedGid = gid;
     this._selection.selectTile(gid);
+    this._stamp = null;
     this._store.selectedGid = gid;
   };
 
@@ -227,6 +230,7 @@ export class BsEditorShell extends BaseElement {
                   .activeTool=${this._activeTool}
                   .activeLayerIndex=${this._activeLayerIndex}
                   .selectedGid=${this._selectedGid}
+                  .stamp=${this._stamp}
                   show-grid
                   @bs-viewport-change=${this._onViewportChange}
                   @bs-cell-hover=${this._onCellHover}
@@ -322,6 +326,7 @@ export class BsEditorShell extends BaseElement {
                     .tileset=${activeTileset}
                     .selectedGid=${this._selectedGid}
                     @bs-tile-select=${this._onTileSelect}
+                    @bs-stamp-select=${this._onStampSelect}
                   ></bs-tileset-panel>`
                 : nothing}
             `
@@ -390,7 +395,16 @@ export class BsEditorShell extends BaseElement {
   private _onTileSelect(e: CustomEvent<{ gid: number }>): void {
     this._selectedGid = e.detail.gid;
     this._selection.selectTile(e.detail.gid);
+    this._stamp = null;
     this._store.selectedGid = e.detail.gid;
+  }
+
+  private _onStampSelect(e: CustomEvent<StampSelectDetail>): void {
+    const { topLeftGid, width, height, tilesetColumns } = e.detail;
+    this._selection.selectStamp(topLeftGid, width, height, tilesetColumns);
+    this._selectedGid = topLeftGid;
+    this._stamp = this._selection.stamp;
+    this._store.selectedGid = topLeftGid;
   }
 
   private _setTool(tool: ToolId): void {

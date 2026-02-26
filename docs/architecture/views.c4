@@ -175,9 +175,27 @@ views {
     backsplash.editorApp.tilesetPanel -> backsplash.editorApp.tilesetModel 'reads updated tilesets via props'
   }
 
-  // ── Flow 4: Stamp Selection (PLANNED — M6) ───────────────────
-  // Multi-tile stamp selection via drag in the tileset panel.
-  // Depends on SelectionModel multi-tile support (planned M6).
+  // ── Flow 4: Stamp Selection ─────────────────────────────────
+  dynamic view stampFlow {
+    title 'Multi-Tile Stamp Selection Flow'
+    description '''
+      User drag-selects a rectangular region of tiles in the
+      tileset panel. The shell updates the SelectionModel with
+      the stamp data, which flows to the canvas and tool engine.
+      The canvas shows a ghost preview; painting applies all
+      stamp tiles in a single batch command.
+    '''
+
+    gamedev -> backsplash.editorApp.tilesetPanel 'drags to select tile region'
+    backsplash.editorApp.tilesetPanel -> backsplash.editorApp.selectionModel 'shell calls selectStamp on bs-stamp-select'
+    backsplash.editorApp.selectionModel -> backsplash.editorApp.mapCanvas 'shell passes stamp via props'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.mapCanvas 'renders ghost preview at hover position'
+
+    gamedev -> backsplash.editorApp.mapCanvas 'clicks/drags on map'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches event with stamp in EditorState'
+    backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'stampBrush writes all stamp GIDs to map'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.historyManager 'shell batches stamp edits on bs-paint-end'
+  }
 
   // ── Flow 5: Tile Painting ─────────────────────────────────────
   dynamic view paintFlow {

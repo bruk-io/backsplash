@@ -34,6 +34,7 @@ function makeState(overrides: Partial<EditorState> = {}): EditorState {
     activeTool: overrides.activeTool ?? 'brush',
     activeLayerIndex: overrides.activeLayerIndex ?? 0,
     selectedGid: overrides.selectedGid ?? 1,
+    stamp: overrides.stamp ?? undefined,
     onEyedrop: overrides.onEyedrop,
   };
 }
@@ -650,5 +651,171 @@ describe('dispatch', () => {
 
     expect(cmd).toBeNull();
     expect(map.getCellGid(0, 0, 0)).toBe(0); // No mutation
+  });
+});
+
+// ── Stamp brush tests (#54, #56) ─────────────────────────────────────
+
+describe('brush with stamp', () => {
+  it('paints a 2x2 stamp as a single batch command', () => {
+    const map = makeMap({ width: 10, height: 8 });
+    const stamp = { width: 2, height: 2, gids: [1, 2, 3, 4] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 1, row: 1 });
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    expect(cmd!.type).toBe('paint');
+    if (cmd!.type === 'paint') {
+      expect(cmd!.edits).toHaveLength(4);
+      expect(map.getCellGid(0, 1, 1)).toBe(1);
+      expect(map.getCellGid(0, 2, 1)).toBe(2);
+      expect(map.getCellGid(0, 1, 2)).toBe(3);
+      expect(map.getCellGid(0, 2, 2)).toBe(4);
+    }
+  });
+
+  it('clips stamp that extends beyond right edge', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    const stamp = { width: 3, height: 1, gids: [1, 2, 3] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 2, row: 0 }); // col 2 + width 3 = 5 > 4
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      // Only cols 2 and 3 are within bounds
+      expect(cmd!.edits).toHaveLength(2);
+      expect(map.getCellGid(0, 2, 0)).toBe(1);
+      expect(map.getCellGid(0, 3, 0)).toBe(2);
+    }
+  });
+
+  it('clips stamp that extends beyond bottom edge', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    const stamp = { width: 1, height: 3, gids: [1, 2, 3] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 0, row: 2 }); // row 2 + height 3 = 5 > 4
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      expect(cmd!.edits).toHaveLength(2);
+      expect(map.getCellGid(0, 0, 2)).toBe(1);
+      expect(map.getCellGid(0, 0, 3)).toBe(2);
+    }
+  });
+
+  it('clips stamp that extends beyond both corners', () => {
+    const map = makeMap({ width: 3, height: 3 });
+    const stamp = { width: 2, height: 2, gids: [1, 2, 3, 4] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 2, row: 2 }); // only (2,2) is in bounds
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      expect(cmd!.edits).toHaveLength(1);
+      expect(map.getCellGid(0, 2, 2)).toBe(1);
+    }
+  });
+
+  it('skips GID 0 entries in the stamp (transparent)', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    const stamp = { width: 2, height: 2, gids: [1, 0, 0, 4] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 0, row: 0 });
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      expect(cmd!.edits).toHaveLength(2);
+      expect(map.getCellGid(0, 0, 0)).toBe(1);
+      expect(map.getCellGid(0, 1, 0)).toBe(0); // skipped (transparent)
+      expect(map.getCellGid(0, 0, 1)).toBe(0); // skipped (transparent)
+      expect(map.getCellGid(0, 1, 1)).toBe(4);
+    }
+  });
+
+  it('returns null on pointer up', () => {
+    const stamp = { width: 2, height: 2, gids: [1, 2, 3, 4] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ type: 'up', col: 0, row: 0 });
+
+    const cmd = brush(event, state, makeMap());
+    expect(cmd).toBeNull();
+  });
+
+  it('returns null when all stamp cells match existing values', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    // Pre-paint the cells
+    map.setCellGid(0, 0, 0, 1);
+    map.setCellGid(0, 1, 0, 2);
+
+    const stamp = { width: 2, height: 1, gids: [1, 2] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 0, row: 0 });
+
+    const cmd = brush(event, state, map);
+    expect(cmd).toBeNull();
+  });
+
+  it('records correct oldGid values for undo', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    map.setCellGid(0, 0, 0, 99);
+    map.setCellGid(0, 1, 0, 88);
+
+    const stamp = { width: 2, height: 1, gids: [1, 2] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: 0, row: 0 });
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      expect(cmd!.edits[0].oldGid).toBe(99);
+      expect(cmd!.edits[1].oldGid).toBe(88);
+    }
+  });
+
+  it('clips stamp that extends beyond top-left edge (negative origin)', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    const stamp = { width: 2, height: 2, gids: [1, 2, 3, 4] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ col: -1, row: -1 });
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      // Only cell (0,0) is in bounds (sc=1, sr=1 → c=0, r=0, gid=4)
+      expect(cmd!.edits).toHaveLength(1);
+      expect(cmd!.edits[0]).toEqual({
+        layerIndex: 0,
+        col: 0,
+        row: 0,
+        oldGid: 0,
+        newGid: 4,
+      });
+    }
+  });
+
+  it('works with pointer move events (drag)', () => {
+    const map = makeMap({ width: 4, height: 4 });
+    const stamp = { width: 2, height: 1, gids: [1, 2] };
+    const state = makeState({ selectedGid: 1, stamp });
+    const event = makeEvent({ type: 'move', col: 0, row: 0 });
+
+    const cmd = brush(event, state, map);
+
+    expect(cmd).not.toBeNull();
+    if (cmd!.type === 'paint') {
+      expect(cmd!.edits).toHaveLength(2);
+    }
   });
 });

@@ -103,11 +103,14 @@ model {
       selectionModel = component 'Selection Model' {
         #core
         description '''
-          Holds the current selection state. Currently supports
-          single tile GID selection for brush painting. The brush
-          tool reads from this to know what to paint.
-          Planned extensions: multi-tile stamp (M6), map region
-          selection for copy/cut/move (M9).
+          Holds the current selection state. Supports single tile
+          GID selection and multi-tile stamp selection (rectangular
+          grid of GIDs with width/height). selectStamp() computes
+          GIDs from a top-left GID, width, height, and tileset
+          column count. 1x1 stamps degenerate to single-tile mode.
+          The shell reads stamp data and passes it to the canvas
+          and tool engine via props.
+          Planned: map region selection for copy/cut/move (M9).
         '''
         technology 'TypeScript'
       }
@@ -117,11 +120,14 @@ model {
         description '''
           Stateless tool strategies dispatched via a strategy
           registry. Each tool receives (ToolEvent, EditorState,
-          TilemapModel) and returns a Command or null. Brush,
-          eraser, and fill return PaintCommands for undo/redo.
-          Eyedropper returns null and signals via a callback
-          (onEyedrop) in EditorState. Called inline by MapCanvas
-          which constructs EditorState from its own properties.
+          TilemapModel) and returns a Command or null. Brush
+          supports single-tile and multi-tile stamp painting —
+          when EditorState.stamp is set, stampBrush() iterates
+          the stamp grid, clips to map bounds, and returns a
+          batch PaintCommand. Eraser and fill return PaintCommands.
+          Eyedropper returns null and signals via onEyedrop callback.
+          Called inline by MapCanvas which constructs EditorState
+          from its own properties.
         '''
         technology 'TypeScript'
       }
@@ -160,10 +166,13 @@ model {
           interactions (click/drag painting). Uses viewport
           culling (only renders tiles within the visible region).
           Renders visible layers with per-layer opacity via
-          Canvas 2D API. Calls ToolEngine dispatch() inline
-          and emits bs-paint, bs-paint-end, bs-eyedrop,
-          bs-viewport-change, and bs-cell-hover events to the
-          parent shell.
+          Canvas 2D API. Shows a semi-transparent ghost preview
+          of the brush tile or stamp at the hover position.
+          Accepts a stamp property for multi-tile painting and
+          passes it to EditorState for the tool engine. Calls
+          ToolEngine dispatch() inline and emits bs-paint,
+          bs-paint-end, bs-eyedrop, bs-viewport-change, and
+          bs-cell-hover events to the parent shell.
         '''
         technology 'Lit 3, Canvas API'
       }
@@ -171,9 +180,10 @@ model {
       tilesetPanel = component 'Tileset Panel' {
         description '''
           Displays loaded tilesets as a grid of tile thumbnails.
-          Allows single-tile selection via click. Emits
-          bs-tile-select events to the parent shell.
-          Planned (M6): multi-tile stamp selection via drag.
+          Single-click selects a tile (bs-tile-select). Click-and-drag
+          selects a rectangular stamp region (bs-stamp-select) with
+          visual highlight during drag. The shell wires stamp data
+          to the SelectionModel and passes it to the canvas/tool engine.
         '''
         technology 'Lit 3'
       }
@@ -196,7 +206,7 @@ model {
         description '''
           Rendered inline in EditorShell using bh-toolbar — not
           a standalone component. Provides tool selection (brush,
-          eraser, fill, eyedropper), undo/redo buttons, and
+          eraser, select, fill, eyedropper), undo/redo buttons, and
           save/export triggers. Tool state and keyboard shortcuts
           (B/E/G/I, Ctrl+Z/Ctrl+Shift+Z) handled by the shell.
         '''
@@ -243,9 +253,9 @@ model {
   tileDetector -> importDialog 'returns ranked size candidates'
   importDialog -> tilesetModel 'shell creates tileset on bs-import-confirm'
 
-  // Tileset panel (emits bs-tile-select, shell updates selection)
+  // Tileset panel (emits bs-tile-select / bs-stamp-select, shell updates selection)
   tilesetPanel -> tilesetModel 'reads tile data from'
-  tilesetPanel -> selectionModel 'shell updates on bs-tile-select'
+  tilesetPanel -> selectionModel 'shell updates on bs-tile-select / bs-stamp-select'
 
   // Map canvas rendering (receives props from shell)
   mapCanvas -> tilemapModel 'reads map data from'
