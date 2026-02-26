@@ -7,10 +7,11 @@ import { EditorStore } from '../models/editor-store.js';
 import { SelectionModel } from '../models/selection-model.js';
 import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
 import type { ToolId } from '../models/editor-store.js';
-import type { Command } from '../models/tool-engine.js';
+import type { Command, CellEdit } from '../models/tool-engine.js';
+import { HistoryManager } from '../models/history-manager.js';
 import type { TileSizeCandidate } from '../workers/tile-detector-wrapper.js';
 import type { ImportImageDetail, ImportConfirmDetail } from './bs-import-dialog.js';
-import type { ViewportChangeDetail, CellHoverDetail } from './bs-map-canvas.js';
+import type { ViewportChangeDetail, CellHoverDetail, EyedropDetail } from './bs-map-canvas.js';
 
 // Register editor icons
 BhIcon.register('layers', '<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>');
@@ -26,6 +27,8 @@ BhIcon.register('download', '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
 BhIcon.register('eye', '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>');
 BhIcon.register('eye-slash', '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>');
 BhIcon.register('lock', '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>');
+BhIcon.register('eyedropper', '<path d="M20.71 5.63l-2.34-2.34a1 1 0 0 0-1.41 0l-3.12 3.12-1.41-1.42-1.42 1.42 1.41 1.41-6.6 6.6A2 2 0 0 0 5 16v3h3a2 2 0 0 0 1.42-.59l6.6-6.6 1.41 1.42 1.42-1.42-1.42-1.41 3.12-3.12a1 1 0 0 0 0-1.65z"/><line x1="5" y1="21" x2="10" y2="21"/>');
+
 
 // Import bh-01 shell components (side-effect registrations)
 import '@bruk-io/bh-01';
@@ -87,6 +90,8 @@ export class BsEditorShell extends BaseElement {
   private _store = new EditorStore();
   private _selection = new SelectionModel();
   private _detector = new TileDetectorWrapper();
+  private _history = new HistoryManager();
+  private _strokeEdits: CellEdit[] = [];
 
   private get _sidebarOpen() {
     return this._panel !== '';
@@ -95,6 +100,12 @@ export class BsEditorShell extends BaseElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this._initDemoTilemap();
+    document.addEventListener('keydown', this._onKeyDown);
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    document.removeEventListener('keydown', this._onKeyDown);
   }
 
   /** Create a default empty tilemap so the canvas shows a grid on first load. */
@@ -119,6 +130,13 @@ export class BsEditorShell extends BaseElement {
   private _onCellHover = (e: CustomEvent<CellHoverDetail>): void => {
     this._cursorCol = e.detail.col;
     this._cursorRow = e.detail.row;
+  };
+
+  private _onEyedrop = (e: CustomEvent<EyedropDetail>): void => {
+    const { gid } = e.detail;
+    this._selectedGid = gid;
+    this._selection.selectTile(gid);
+    this._store.selectedGid = gid;
   };
 
   override render() {
@@ -157,11 +175,14 @@ export class BsEditorShell extends BaseElement {
               <bh-button size="sm" variant=${this._activeTool === 'fill' ? 'primary' : 'ghost'} icon-only label="Fill" @click=${() => this._setTool('fill')}>
                 <bh-icon slot="prefix" name="paint-bucket"></bh-icon>
               </bh-button>
+              <bh-button size="sm" variant=${this._activeTool === 'eyedropper' ? 'primary' : 'ghost'} icon-only label="Eyedropper" @click=${() => this._setTool('eyedropper')}>
+                <bh-icon slot="prefix" name="eyedropper"></bh-icon>
+              </bh-button>
               <bh-divider vertical spacing="sm"></bh-divider>
-              <bh-button size="sm" variant="ghost" icon-only label="Undo">
+              <bh-button size="sm" variant="ghost" icon-only label="Undo" ?disabled=${!this._history.canUndo} @click=${this._onUndo}>
                 <bh-icon slot="prefix" name="arrow-counter-clockwise"></bh-icon>
               </bh-button>
-              <bh-button size="sm" variant="ghost" icon-only label="Redo">
+              <bh-button size="sm" variant="ghost" icon-only label="Redo" ?disabled=${!this._history.canRedo} @click=${this._onRedo}>
                 <bh-icon slot="prefix" name="arrow-clockwise"></bh-icon>
               </bh-button>
             </bh-cluster>
@@ -190,6 +211,7 @@ export class BsEditorShell extends BaseElement {
                   @bs-cell-hover=${this._onCellHover}
                   @bs-paint=${this._onPaint}
                   @bs-paint-end=${this._onPaintEnd}
+                  @bs-eyedrop=${this._onEyedrop}
                 ></bs-map-canvas>`
               : html`<bh-center intrinsic>
                   <bh-stack gap="xs" align="center">
@@ -352,14 +374,72 @@ export class BsEditorShell extends BaseElement {
     this._store.activeTool = tool;
   }
 
-  private _onPaint(_e: CustomEvent<{ command: Command }>): void {
-    // For now just request update to re-render. History comes in M4.
+  private _onPaint(e: CustomEvent<{ command: Command }>): void {
+    // Accumulate edits from each cell during a drag stroke.
+    if (e.detail.command.type === 'paint') {
+      this._strokeEdits.push(...e.detail.command.edits);
+    }
     this.requestUpdate();
   }
 
   private _onPaintEnd(): void {
-    // Future: batch commands into history. For now no-op.
+    // Merge all edits from the stroke into a single PaintCommand and record it.
+    if (this._strokeEdits.length > 0) {
+      this._history.push({ type: 'paint', edits: this._strokeEdits });
+      this._strokeEdits = [];
+    }
   }
+
+  private _onUndo(): void {
+    if (this._tilemap && this._history.canUndo) {
+      this._history.undo(this._tilemap);
+      this.requestUpdate();
+    }
+  }
+
+  private _onRedo(): void {
+    if (this._tilemap && this._history.canRedo) {
+      this._history.redo(this._tilemap);
+      this.requestUpdate();
+    }
+  }
+
+  private _onKeyDown = (e: KeyboardEvent): void => {
+    const mod = e.metaKey || e.ctrlKey;
+
+    // Undo/redo require modifier key
+    if (mod) {
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        this._onUndo();
+      } else if (e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        this._onRedo();
+      }
+      return;
+    }
+
+    // Single-letter tool shortcuts — skip if focus is in an input/textarea
+    const target = e.target as Element | null;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    switch (e.key) {
+      case 'b':
+        this._setTool('brush');
+        break;
+      case 'e':
+        this._setTool('eraser');
+        break;
+      case 'g':
+        this._setTool('fill');
+        break;
+      case 'i':
+        this._setTool('eyedropper');
+        break;
+    }
+  };
 
   private _onActivity(e: CustomEvent<{ id: string }>) {
     this._panel = (e.detail.id || '') as PanelId;

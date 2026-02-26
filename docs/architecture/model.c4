@@ -116,20 +116,21 @@ model {
           Stateless tool strategies dispatched via a strategy
           registry. Each tool receives (ToolEvent, EditorState,
           TilemapModel) and returns a Command object for undo/redo.
-          Currently implements: brush. Planned: eraser, bucket
-          fill, eyedropper (M4). No internal state — active tool
-          identity lives in Editor Store.
+          Implements: brush, eraser, bucket fill (BFS), eyedropper.
+          No internal state — active tool identity lives in
+          Editor Store.
         '''
         technology 'TypeScript'
       }
 
       historyManager = component 'History Manager' {
-        #core, #planned
+        #core
         description '''
-          Planned (M4). Undo/redo via command pattern. Will
-          capture every map and layer mutation as a reversible
-          command. Tool Engine already produces Command objects
-          in preparation for this component.
+          Undo/redo via command pattern. Every map mutation is
+          captured as a reversible PaintCommand storing (cell,
+          oldGid, newGid) tuples. Fixed-size stack bounded by
+          both command count and byte size. Extends EventTarget,
+          dispatches history-change events for UI reactivity.
         '''
         technology 'TypeScript'
       }
@@ -250,12 +251,14 @@ model {
   // Layer management (stub — planned M5)
   layerPanel -> layerModel 'displays layer stack from'
 
+  // History — shell mediates between canvas/toolbar and HistoryManager
+  toolEngine -> historyManager 'shell pushes commands from completed strokes'
+  toolbar -> historyManager 'shell triggers undo/redo on click or Ctrl+Z'
+  historyManager -> tilemapModel 'restores previous cell values on undo/redo'
+
   // ── Planned relationships (not yet implemented) ─────────────────
 
-  // History (planned M4)
-  // toolEngine -> historyManager 'records commands in'
-  // toolbar -> historyManager 'triggers undo/redo in'
-  // historyManager -> tilemapModel 'restores map state in'
+  // Layer history (planned M5)
   // historyManager -> layerModel 'restores layer state in'
   // layerPanel -> historyManager 'records layer commands in'
 

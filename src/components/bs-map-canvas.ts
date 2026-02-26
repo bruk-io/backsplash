@@ -40,6 +40,11 @@ export interface PaintDetail {
   command: Command;
 }
 
+/** Eyedrop event detail — carries the GID picked by the eyedropper tool. */
+export interface EyedropDetail {
+  gid: number;
+}
+
 /**
  * Map canvas component — renders tilemap data onto an HTML canvas.
  *
@@ -499,6 +504,15 @@ export class BsMapCanvas extends BaseElement {
       activeTool: this.activeTool,
       activeLayerIndex: this.activeLayerIndex,
       selectedGid: this.selectedGid,
+      onEyedrop: (gid: number) => {
+        this.dispatchEvent(
+          new CustomEvent<EyedropDetail>('bs-eyedrop', {
+            detail: { gid },
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      },
     };
 
     const command = dispatch({ type: eventType, col, row }, editorState, map);

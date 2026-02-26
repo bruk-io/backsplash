@@ -204,16 +204,48 @@ views {
     // Tool engine applies mutation
     backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'writes GID to cell on active layer'
 
+    // Shell records stroke in history on pointer up
+    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'shell batches stroke edits into one command'
+
     // Canvas re-renders
     backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile image for painted GID'
   }
 
-  // ── Flow 6: Bucket Fill (PLANNED — M4) ──────────────────────
-  // Depends on ToolEngine fill strategy and HistoryManager.
+  // ── Flow 6: Bucket Fill ─────────────────────────────────────
+  dynamic view fillFlow {
+    title 'Bucket Fill Flow'
+    description '''
+      Flood-fills a contiguous region of same-valued cells
+      with the active tile using BFS (4-directional). Captured
+      as a single undoable batch command. Bounded to 10k cells.
+    '''
 
-  // ── Flow 7: Undo / Redo (PLANNED — M4) ──────────────────────
-  // Depends on HistoryManager component. Tool Engine already
-  // produces Command objects in preparation.
+    gamedev -> backsplash.editorApp.toolbar 'selects fill tool (or presses G)'
+    backsplash.editorApp.toolbar -> backsplash.editorApp.editorStore 'shell sets active tool to fill'
+
+    gamedev -> backsplash.editorApp.mapCanvas 'clicks target cell'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches pointer event with cell coords'
+
+    backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'BFS flood fills contiguous cells with selected GID'
+    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'shell pushes batch PaintCommand'
+
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile images for filled region'
+  }
+
+  // ── Flow 7: Undo / Redo ────────────────────────────────────
+  dynamic view undoRedoFlow {
+    title 'Undo / Redo Flow'
+    description '''
+      Every map mutation is reversible. Undo pops the last
+      command and restores previous cell values. Redo re-applies.
+      Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z.
+    '''
+
+    gamedev -> backsplash.editorApp.toolbar 'clicks undo (or Ctrl+Z)'
+    backsplash.editorApp.toolbar -> backsplash.editorApp.historyManager 'shell calls history.undo(tilemap)'
+    backsplash.editorApp.historyManager -> backsplash.editorApp.tilemapModel 'restores previous cell values from command'
+    backsplash.editorApp.tilemapModel -> backsplash.editorApp.mapCanvas 'shell calls requestUpdate(), canvas re-renders via props'
+  }
 
   // ── Flow 8: Save / Export (PLANNED — M7) ────────────────────
   // Depends on Serializer component.
