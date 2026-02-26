@@ -3,3 +3,4 @@ import './components/bs-editor-shell.js';
 import './components/bs-map-canvas.js';
 import './components/bs-tileset-panel.js';
 import './components/bs-import-dialog.js';
+import './components/bs-layer-panel.js';

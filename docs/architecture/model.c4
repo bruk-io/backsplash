@@ -126,11 +126,12 @@ model {
       historyManager = component 'History Manager' {
         #core
         description '''
-          Undo/redo via command pattern. Every map mutation is
-          captured as a reversible PaintCommand storing (cell,
-          oldGid, newGid) tuples. Fixed-size stack bounded by
-          both command count and byte size. Extends EventTarget,
-          dispatches history-change events for UI reactivity.
+          Undo/redo via command pattern. Supports PaintCommand
+          (cell edits), AddLayerCommand, DeleteLayerCommand,
+          ReorderLayerCommand, and RenameLayerCommand. Fixed-size
+          stack bounded by both command count (100) and byte size
+          (10MB). Extends EventTarget, dispatches history-change
+          events for UI reactivity.
         '''
         technology 'TypeScript'
       }
@@ -173,10 +174,14 @@ model {
 
       layerPanel = component 'Layer Panel' {
         description '''
-          Displays the layer stack. Currently a stub rendered
-          inline by EditorShell showing a static single-layer
-          tree view. Planned (M5): drag-to-reorder, visibility
-          toggles, opacity sliders, add/remove/rename.
+          Displays the layer stack in reverse order (top layer
+          first). Each row shows layer name, visibility toggle,
+          lock toggle, opacity slider, and a drag handle for
+          reordering. Double-click name to rename inline. All
+          mutations emitted as events to the parent shell.
+          Emits bs-layer-select, bs-layer-add, bs-layer-delete,
+          bs-layer-rename, bs-layer-visibility, bs-layer-opacity,
+          bs-layer-lock, bs-layer-reorder events.
         '''
         technology 'Lit 3'
       }
@@ -248,19 +253,20 @@ model {
   mapCanvas -> toolEngine 'dispatches pointer events to'
   toolEngine -> tilemapModel 'mutates map cells via'
 
-  // Layer management (stub — planned M5)
+  // Layer management
   layerPanel -> layerModel 'displays layer stack from'
+  layerPanel -> editorStore 'shell updates active layer on bs-layer-select'
 
   // History — shell mediates between canvas/toolbar and HistoryManager
   toolEngine -> historyManager 'shell pushes commands from completed strokes'
   toolbar -> historyManager 'shell triggers undo/redo on click or Ctrl+Z'
   historyManager -> tilemapModel 'restores previous cell values on undo/redo'
 
-  // ── Planned relationships (not yet implemented) ─────────────────
+  // Layer history
+  layerPanel -> historyManager 'shell pushes layer commands on add/delete/rename/reorder'
+  historyManager -> layerModel 'restores layer state on undo/redo'
 
-  // Layer history (planned M5)
-  // historyManager -> layerModel 'restores layer state in'
-  // layerPanel -> historyManager 'records layer commands in'
+  // ── Planned relationships (not yet implemented) ─────────────────
 
   // Serialization (planned M7)
   // toolbar -> serializer 'triggers save/export in'

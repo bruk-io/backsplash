@@ -1,5 +1,6 @@
 import { TilemapModel } from './tilemap-model.js';
 import { EMPTY_GID } from './gid.js';
+import type { Layer } from './layer-model.js';
 
 // ── Command types (consumed by HistoryManager in M4) ──────────────────
 
@@ -18,8 +19,46 @@ export interface PaintCommand {
   edits: CellEdit[];
 }
 
+/** Command produced by adding a new layer. */
+export interface AddLayerCommand {
+  type: 'add-layer';
+  /** Index at which the layer was inserted. */
+  layerIndex: number;
+  /** The layer that was added (stored for redo). */
+  layer: Layer;
+}
+
+/** Command produced by deleting a layer. */
+export interface DeleteLayerCommand {
+  type: 'delete-layer';
+  /** Index from which the layer was removed. */
+  layerIndex: number;
+  /** Full layer data stored for undo restoration. */
+  layer: Layer;
+}
+
+/** Command produced by reordering a layer. */
+export interface ReorderLayerCommand {
+  type: 'reorder-layer';
+  fromIndex: number;
+  toIndex: number;
+}
+
+/** Command produced by renaming a layer. */
+export interface RenameLayerCommand {
+  type: 'rename-layer';
+  layerIndex: number;
+  oldName: string;
+  newName: string;
+}
+
 /** Union of all command types. Will grow as more tools are added. */
-export type Command = PaintCommand;
+export type Command =
+  | PaintCommand
+  | AddLayerCommand
+  | DeleteLayerCommand
+  | ReorderLayerCommand
+  | RenameLayerCommand;
 
 // ── Event and state interfaces ────────────────────────────────────────
 

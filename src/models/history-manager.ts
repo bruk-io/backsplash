@@ -1,5 +1,14 @@
 import type { TilemapModel } from './tilemap-model.js';
-import type { Command, PaintCommand, CellEdit } from './tool-engine.js';
+import type {
+  Command,
+  PaintCommand,
+  CellEdit,
+  AddLayerCommand,
+  DeleteLayerCommand,
+  ReorderLayerCommand,
+  RenameLayerCommand,
+} from './tool-engine.js';
+import { setLayerName } from './layer-model.js';
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -25,6 +34,15 @@ export function estimateCommandBytes(command: Command): number {
   switch (command.type) {
     case 'paint':
       return command.edits.length * BYTES_PER_CELL_EDIT;
+    case 'add-layer':
+    case 'delete-layer':
+      return command.layer.type === 'tile'
+        ? command.layer.data.byteLength
+        : 100;
+    case 'reorder-layer':
+      return 16; // 2 numbers × 4 bytes each (generous estimate)
+    case 'rename-layer':
+      return command.oldName.length + command.newName.length;
   }
 }
 
@@ -46,10 +64,82 @@ function applyPaintRedo(tilemap: TilemapModel, command: PaintCommand): void {
   }
 }
 
+function applyAddLayerUndo(tilemap: TilemapModel, command: AddLayerCommand): void {
+  tilemap.removeLayer(command.layerIndex);
+}
+
+function applyAddLayerRedo(tilemap: TilemapModel, command: AddLayerCommand): void {
+  // Re-insert the layer at the original position using splice via addLayer
+  // We need to insert at a specific index, so we remove-and-reinsert
+  // by temporarily inserting at the end then using replaceLayer semantics.
+  // Simplest: push all layers above, insert, then restore order via removeLayer
+  // and splice trick — instead, replaceLayer exists for renames. For positional
+  // insert we use removeLayer to extract layers above, addLayer, then re-add.
+  // Actually the cleanest approach: push then move.
+  // Even simpler: use a direct splice via the tilemap's removeLayer API.
+  // But TilemapModel only exposes addLayer (appends) and removeLayer (by index).
+  // For inserting at an arbitrary index we use the same approach as moveLayer:
+  // append and then move into position if needed.
+  const currentLength = tilemap.layers.length;
+  tilemap.addLayer(command.layer); // appended at end (index = currentLength)
+  if (currentLength !== command.layerIndex) {
+    tilemap.moveLayer(currentLength, command.layerIndex);
+  }
+}
+
+function applyDeleteLayerUndo(tilemap: TilemapModel, command: DeleteLayerCommand): void {
+  // Re-insert the deleted layer at its original index
+  const currentLength = tilemap.layers.length;
+  tilemap.addLayer(command.layer); // appended at end (index = currentLength)
+  if (currentLength !== command.layerIndex) {
+    tilemap.moveLayer(currentLength, command.layerIndex);
+  }
+}
+
+function applyDeleteLayerRedo(tilemap: TilemapModel, command: DeleteLayerCommand): void {
+  tilemap.removeLayer(command.layerIndex);
+}
+
+function applyReorderLayerUndo(tilemap: TilemapModel, command: ReorderLayerCommand): void {
+  tilemap.moveLayer(command.toIndex, command.fromIndex);
+}
+
+function applyReorderLayerRedo(tilemap: TilemapModel, command: ReorderLayerCommand): void {
+  tilemap.moveLayer(command.fromIndex, command.toIndex);
+}
+
+function applyRenameLayerUndo(tilemap: TilemapModel, command: RenameLayerCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer) {
+    return;
+  }
+  tilemap.replaceLayer(command.layerIndex, setLayerName(layer, command.oldName));
+}
+
+function applyRenameLayerRedo(tilemap: TilemapModel, command: RenameLayerCommand): void {
+  const layer = tilemap.getLayer(command.layerIndex);
+  if (!layer) {
+    return;
+  }
+  tilemap.replaceLayer(command.layerIndex, setLayerName(layer, command.newName));
+}
+
 function applyUndo(tilemap: TilemapModel, command: Command): void {
   switch (command.type) {
     case 'paint':
       applyPaintUndo(tilemap, command);
+      break;
+    case 'add-layer':
+      applyAddLayerUndo(tilemap, command);
+      break;
+    case 'delete-layer':
+      applyDeleteLayerUndo(tilemap, command);
+      break;
+    case 'reorder-layer':
+      applyReorderLayerUndo(tilemap, command);
+      break;
+    case 'rename-layer':
+      applyRenameLayerUndo(tilemap, command);
       break;
   }
 }
@@ -58,6 +148,18 @@ function applyRedo(tilemap: TilemapModel, command: Command): void {
   switch (command.type) {
     case 'paint':
       applyPaintRedo(tilemap, command);
+      break;
+    case 'add-layer':
+      applyAddLayerRedo(tilemap, command);
+      break;
+    case 'delete-layer':
+      applyDeleteLayerRedo(tilemap, command);
+      break;
+    case 'reorder-layer':
+      applyReorderLayerRedo(tilemap, command);
+      break;
+    case 'rename-layer':
+      applyRenameLayerRedo(tilemap, command);
       break;
   }
 }
