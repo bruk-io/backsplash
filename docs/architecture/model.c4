@@ -124,24 +124,22 @@ model {
       }
 
       historyManager = component 'History Manager' {
-        #core
+        #core, #planned
         description '''
-          Undo/redo via command pattern. Every map and layer
-          mutation is captured as a reversible command. Fixed-size
-          stack bounded by both command count and byte size to
-          prevent memory exhaustion from large flood fills.
+          Planned (M4). Undo/redo via command pattern. Will
+          capture every map and layer mutation as a reversible
+          command. Tool Engine already produces Command objects
+          in preparation for this component.
         '''
         technology 'TypeScript'
       }
 
       serializer = component 'Serializer' {
-        #core
+        #core, #planned
         description '''
-          Save/load projects as JSON. Export to engine-specific
-          formats (Tiled JSON, Godot .tscn, raw 2D arrays).
-          Import from Tiled JSON. On project open, tileset image
-          references are re-linked via File System Access API
-          handles persisted in IndexedDB.
+          Planned (M7). Will save/load projects as JSON, export
+          to engine-specific formats (Tiled JSON, Godot .tscn,
+          raw 2D arrays), and import from Tiled JSON.
         '''
         technology 'TypeScript'
       }
@@ -164,18 +162,20 @@ model {
 
       tilesetPanel = component 'Tileset Panel' {
         description '''
-          Displays loaded tilesets as a grid. Allows single-tile
-          and multi-tile (stamp) selection via drag-select.
-          Writes selection state to Selection Model.
+          Displays loaded tilesets as a grid of tile thumbnails.
+          Allows single-tile selection via click. Emits
+          bs-tile-select events to the parent shell.
+          Planned (M6): multi-tile stamp selection via drag.
         '''
         technology 'Lit 3'
       }
 
       layerPanel = component 'Layer Panel' {
         description '''
-          Layer list with drag-to-reorder, visibility toggles,
-          opacity sliders, lock toggles, add/remove/rename.
-          Layer mutations are recorded in History Manager.
+          Displays the layer stack. Currently a stub rendered
+          inline by EditorShell showing a static single-layer
+          tree view. Planned (M5): drag-to-reorder, visibility
+          toggles, opacity sliders, add/remove/rename.
         '''
         technology 'Lit 3'
       }
@@ -240,25 +240,28 @@ model {
   mapCanvas -> tilesetModel 'reads tile images from'
 
   // Tool interactions (canvas dispatches to engine, emits events up)
+  // Shell builds EditorState from its own reactive properties and
+  // passes selectedGid as a plain number — ToolEngine never touches
+  // SelectionModel directly.
   toolbar -> editorStore 'shell sets active tool on click'
   mapCanvas -> toolEngine 'dispatches pointer events to'
   toolEngine -> tilemapModel 'mutates map cells via'
-  toolEngine -> selectionModel 'reads active selection from'
 
-  // Layer management
-  layerPanel -> layerModel 'manages layers via'
-  layerPanel -> editorStore 'shell sets active layer on selection'
+  // Layer management (stub — planned M5)
+  layerPanel -> layerModel 'displays layer stack from'
+
+  // ── Planned relationships (not yet implemented) ─────────────────
 
   // History (planned M4)
-  toolEngine -> historyManager 'records commands in'
-  toolbar -> historyManager 'triggers undo/redo in'
-  historyManager -> tilemapModel 'restores map state in'
-  historyManager -> layerModel 'restores layer state in'
-  layerPanel -> historyManager 'records layer commands in'
+  // toolEngine -> historyManager 'records commands in'
+  // toolbar -> historyManager 'triggers undo/redo in'
+  // historyManager -> tilemapModel 'restores map state in'
+  // historyManager -> layerModel 'restores layer state in'
+  // layerPanel -> historyManager 'records layer commands in'
 
   // Serialization (planned M7)
-  toolbar -> serializer 'triggers save/export in'
-  serializer -> tilemapModel 'serializes/deserializes'
-  serializer -> tilesetModel 'serializes/deserializes'
-  serializer -> layerModel 'serializes/deserializes'
+  // toolbar -> serializer 'triggers save/export in'
+  // serializer -> tilemapModel 'serializes/deserializes'
+  // serializer -> tilesetModel 'serializes/deserializes'
+  // serializer -> layerModel 'serializes/deserializes'
 }

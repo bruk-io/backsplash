@@ -108,52 +108,12 @@ views {
   // Dynamic Views — User Flows
   // ════════════════════════════════════════════════════════════════
 
-  // ── Flow 1: New Map Creation ──────────────────────────────────
-  dynamic view newMapFlow {
-    title 'New Map Creation'
-    description '''
-      User creates a new map project, specifying dimensions
-      and tile size. The editor initializes the tilemap model
-      with a single empty tile layer.
-    '''
+  // ── Flow 1: New Map Creation (PLANNED) ───────────────────────
+  // Currently the editor auto-creates a demo tilemap on load.
+  // A proper "New Map" dialog is planned for a future milestone.
 
-    gamedev -> backsplash.editorApp.toolbar 'clicks New Map'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.tilemapModel 'creates map with dimensions and tile size'
-    backsplash.editorApp.tilemapModel -> backsplash.editorApp.layerModel 'creates initial empty tile layer'
-    backsplash.editorApp.tilemapModel -> backsplash.editorApp.editorStore 'registers new map as active project'
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits new map state'
-    backsplash.editorApp.editorStore -> backsplash.editorApp.layerPanel 'emits initial layer list'
-  }
-
-  // ── Flow 2: Open Existing Project ─────────────────────────────
-  dynamic view openProjectFlow {
-    title 'Open Existing Project'
-    description '''
-      User opens a previously saved .backsplash project file.
-      The serializer reconstructs the full model state and
-      re-links tileset images from persisted file handles.
-    '''
-
-    gamedev -> backsplash.editorApp.toolbar 'clicks Open Project'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.serializer 'triggers project load'
-    backsplash.editorApp.serializer -> filesystem 'reads .backsplash JSON file' {
-      notes '''
-        Uses File System Access API. File handles for tileset
-        images are persisted in IndexedDB so the user does not
-        need to re-select them on each open.
-      '''
-    }
-
-    // Reconstruct models
-    backsplash.editorApp.serializer -> backsplash.editorApp.tilemapModel 'reconstructs map and layers'
-    backsplash.editorApp.serializer -> backsplash.editorApp.tilesetModel 'reconstructs tileset registry and re-links images'
-
-    // Update store and notify UI
-    backsplash.editorApp.tilemapModel -> backsplash.editorApp.editorStore 'registers loaded map'
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits full map state'
-    backsplash.editorApp.editorStore -> backsplash.editorApp.tilesetPanel 'emits loaded tilesets'
-    backsplash.editorApp.editorStore -> backsplash.editorApp.layerPanel 'emits loaded layers'
-  }
+  // ── Flow 2: Open Existing Project (PLANNED — M7) ───────────
+  // Depends on the Serializer component (planned M7).
 
   // ── Flow 3: Tileset Import ────────────────────────────────────
   dynamic view importFlow {
@@ -214,245 +174,54 @@ views {
     backsplash.editorApp.editorStore -> backsplash.editorApp.tilesetPanel 'emits updated tileset list'
   }
 
-  // ── Flow 4: Stamp Selection ───────────────────────────────────
-  dynamic view stampSelectionFlow {
-    title 'Multi-Tile Stamp Selection'
-    description '''
-      User drag-selects a rectangular region from the tileset
-      panel to create a multi-tile stamp. The stamp is stored
-      in the Selection Model and used by the brush tool.
-    '''
-
-    gamedev -> backsplash.editorApp.tilesetPanel 'drag-selects a 3x2 region of tiles'
-    backsplash.editorApp.tilesetPanel -> backsplash.editorApp.selectionModel 'records stamp (startGID, width, height)' {
-      notes '''
-        The stamp captures a rectangular slice of GIDs from
-        the tileset grid. For a 3x2 selection starting at
-        GID 10 in a 16-column tileset, the stamp stores:
-        [10, 11, 12, 26, 27, 28] — row-major order.
-      '''
-    }
-
-    backsplash.editorApp.selectionModel -> backsplash.editorApp.editorStore 'updates active selection'
-
-    // Painting with the stamp
-    gamedev -> backsplash.editorApp.mapCanvas 'clicks to place stamp'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches pointer event + cell coords'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.selectionModel 'reads active stamp dimensions'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'writes GIDs for all cells in stamp footprint'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'records multi-cell stamp command' {
-      notes '''
-        Stored as a batch command with all affected (cell, oldGID,
-        newGID) tuples so the full stamp is undone as one operation.
-      '''
-    }
-  }
+  // ── Flow 4: Stamp Selection (PLANNED — M6) ───────────────────
+  // Multi-tile stamp selection via drag in the tileset panel.
+  // Depends on SelectionModel multi-tile support (planned M6).
 
   // ── Flow 5: Tile Painting ─────────────────────────────────────
   dynamic view paintFlow {
     title 'Tile Painting Flow'
     description '''
       The primary editing loop. User selects a tile from the
-      tileset panel, paints on the canvas, and the map is
-      updated with undo support.
+      tileset panel, paints on the canvas via click/drag, and
+      the map cells are updated immediately. The canvas
+      schedules its own re-render after each mutation.
     '''
 
     // Select a tile from the palette
-    gamedev -> backsplash.editorApp.tilesetPanel 'selects tile from palette'
-    backsplash.editorApp.tilesetPanel -> backsplash.editorApp.selectionModel 'sets single-tile selection'
-    backsplash.editorApp.selectionModel -> backsplash.editorApp.editorStore 'updates active selection'
+    gamedev -> backsplash.editorApp.tilesetPanel 'clicks tile in palette'
+    backsplash.editorApp.tilesetPanel -> backsplash.editorApp.selectionModel 'shell updates selectedGid on bs-tile-select'
 
     // Select brush tool
     gamedev -> backsplash.editorApp.toolbar 'selects brush tool'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.editorStore 'sets active tool to brush'
+    backsplash.editorApp.toolbar -> backsplash.editorApp.editorStore 'shell sets active tool to brush'
 
     // Paint on the canvas
     gamedev -> backsplash.editorApp.mapCanvas 'clicks/drags on map cell'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches pointer event + cell coords'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches pointer event with cell coords and EditorState'
 
-    // Tool engine reads state and applies mutation
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.editorStore 'reads active tool, layer, and selection'
+    // Tool engine applies mutation
     backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'writes GID to cell on active layer'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'records paint command'
 
-    // Reactive update
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits dirty region'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile image for GID'
+    // Canvas re-renders
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile image for painted GID'
   }
 
-  // ── Flow 6: Bucket Fill ───────────────────────────────────────
-  dynamic view fillFlow {
-    title 'Bucket Fill Flow'
-    description '''
-      Flood-fills a contiguous region of same-valued cells
-      with the active tile. Captured as a single undoable
-      batch operation.
-    '''
+  // ── Flow 6: Bucket Fill (PLANNED — M4) ──────────────────────
+  // Depends on ToolEngine fill strategy and HistoryManager.
 
-    gamedev -> backsplash.editorApp.toolbar 'selects fill tool'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.editorStore 'sets active tool to fill'
+  // ── Flow 7: Undo / Redo (PLANNED — M4) ──────────────────────
+  // Depends on HistoryManager component. Tool Engine already
+  // produces Command objects in preparation.
 
-    gamedev -> backsplash.editorApp.mapCanvas 'clicks target cell'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches click + cell coords'
+  // ── Flow 8: Save / Export (PLANNED — M7) ────────────────────
+  // Depends on Serializer component.
 
-    // Fill reads current state to find region
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.editorStore 'reads active layer and selection'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'reads contiguous region (flood scan)' {
-      notes '''
-        BFS from clicked cell, collecting all connected cells
-        with the same GID. Bounded to prevent runaway on large
-        empty maps.
-      '''
-    }
+  // ── Flow 9: Layer Management (PLANNED — M5) ─────────────────
+  // Depends on Layer Panel becoming a real component with
+  // interaction handlers.
 
-    // Batch mutation
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'writes GID to all cells in region'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'records batch fill command' {
-      notes '''
-        Stores the full set of (cell, oldGID, newGID) tuples
-        so the entire fill is undone/redone as one operation.
-        History stack is bounded by byte size to handle large fills.
-      '''
-    }
-
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits dirty region'
-  }
-
-  // ── Flow 7: Undo / Redo ──────────────────────────────────────
-  dynamic view undoRedoFlow {
-    title 'Undo / Redo Flow'
-    description '''
-      Every map and layer mutation is reversible. Undo pops
-      the last command and restores previous state. Redo
-      re-applies it. Both paths shown.
-    '''
-
-    // Undo
-    gamedev -> backsplash.editorApp.toolbar 'clicks undo (or Ctrl+Z)'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.historyManager 'triggers undo'
-    backsplash.editorApp.historyManager -> backsplash.editorApp.tilemapModel 'restores previous cell values' {
-      notes '''
-        Pops the top command from the undo stack, applies
-        its inverse (old values), and pushes it onto the
-        redo stack. Works for tile, fill, stamp, and layer
-        commands alike.
-      '''
-    }
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits changed region'
-
-    // Redo
-    gamedev -> backsplash.editorApp.toolbar 'clicks redo (or Ctrl+Shift+Z)'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.historyManager 'triggers redo'
-    backsplash.editorApp.historyManager -> backsplash.editorApp.tilemapModel 'reapplies command values' {
-      notes '''
-        Pops from the redo stack, applies forward values,
-        pushes back onto the undo stack.
-      '''
-    }
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits changed region'
-  }
-
-  // ── Flow 8: Save / Export ─────────────────────────────────────
-  dynamic view saveExportFlow {
-    title 'Save & Export Flow'
-    description '''
-      Serializes the current project to JSON for saving, or
-      exports to engine-specific formats for game consumption.
-    '''
-
-    gamedev -> backsplash.editorApp.toolbar 'clicks save or export'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.serializer 'triggers save or export'
-
-    // Serializer reads all models
-    parallel {
-      backsplash.editorApp.serializer -> backsplash.editorApp.tilemapModel 'reads map dimensions and metadata'
-      backsplash.editorApp.serializer -> backsplash.editorApp.layerModel 'reads all layers and cell data'
-      backsplash.editorApp.serializer -> backsplash.editorApp.tilesetModel 'reads tileset references'
-    }
-
-    // Write to filesystem
-    backsplash.editorApp.serializer -> filesystem 'writes project JSON or engine format' {
-      notes '''
-        **Save:** Native .backsplash JSON format with full
-        project state (map, layers, tileset refs, metadata).
-        File handles persisted to IndexedDB for re-open.
-
-        **Export:** Tiled JSON, Godot .tscn, raw 2D arrays,
-        or flattened PNG image.
-      '''
-    }
-  }
-
-  // ── Flow 9: Layer Management ──────────────────────────────────
-  dynamic view layerFlow {
-    title 'Layer Management Flow'
-    description '''
-      Adding, reordering, and toggling layer visibility.
-      All layer mutations are recorded in history for undo.
-      Changes immediately affect canvas rendering.
-    '''
-
-    // Add layer
-    gamedev -> backsplash.editorApp.layerPanel 'adds new tile layer'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.layerModel 'creates layer with default name'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'records add-layer command'
-
-    // Reorder
-    gamedev -> backsplash.editorApp.layerPanel 'drags layer to reorder'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.layerModel 'updates z-order'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.historyManager 'records reorder command'
-
-    // Toggle visibility
-    gamedev -> backsplash.editorApp.layerPanel 'toggles layer visibility'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.layerModel 'sets visible flag'
-
-    // Reactive canvas update
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits layer stack change'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.mapCanvas 're-composites visible layers' {
-      notes '''
-        Canvas iterates layers bottom-to-top, drawing each
-        visible layer with its opacity via offscreen canvas
-        compositing. Hidden layers skipped entirely.
-        Only the viewport region is re-rendered.
-      '''
-    }
-  }
-
-  // ── Flow 10: Object Placement ─────────────────────────────────
-  dynamic view objectPlacementFlow {
-    title 'Object Placement Flow'
-    description '''
-      Placing freeform objects (spawn points, triggers, NPCs)
-      on an object layer. Objects are not grid-locked — they
-      have pixel coordinates, dimensions, and custom properties.
-    '''
-
-    // Switch to object layer
-    gamedev -> backsplash.editorApp.layerPanel 'selects an object layer'
-    backsplash.editorApp.layerPanel -> backsplash.editorApp.editorStore 'sets active layer to object layer'
-
-    // Select object tool
-    gamedev -> backsplash.editorApp.toolbar 'selects object placement tool'
-    backsplash.editorApp.toolbar -> backsplash.editorApp.editorStore 'sets active tool to object'
-
-    // Place object on canvas
-    gamedev -> backsplash.editorApp.mapCanvas 'clicks position on canvas'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches click + pixel coords' {
-      notes '''
-        Unlike tile tools which snap to grid, object placement
-        uses raw pixel coordinates within the map space.
-      '''
-    }
-
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.layerModel 'adds object to active object layer' {
-      notes '''
-        Creates a MapObject with: x, y (pixel coords),
-        width, height, type string, and a properties map
-        for game-specific key-value metadata.
-      '''
-    }
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'records add-object command'
-
-    backsplash.editorApp.editorStore -> backsplash.editorApp.mapCanvas 'emits object layer change'
-  }
+  // ── Flow 10: Object Placement (PLANNED) ─────────────────────
+  // Depends on object layer support in ToolEngine and
+  // LayerModel object layer API.
 }
