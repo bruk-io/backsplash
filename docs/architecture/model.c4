@@ -40,12 +40,14 @@ model {
       editorStore = component 'Editor Store' {
         #core, #reactive
         description '''
-          Reactive state container and single source of truth for
-          editor-wide state: active tool, active layer, active
-          tileset, selected tile(s)/stamp, viewport pan/zoom.
-          UI components subscribe to state changes via signals.
-          Core models are plain data; the store provides reactive
-          wrappers and derived values.
+          Reactive state container extending EventTarget. Holds
+          editor-wide state: active tool, active layer, selected
+          tile GID, tilemap reference, viewport pan/zoom. Dispatches
+          'editor-state-change' CustomEvents when properties change.
+          Currently the EditorShell orchestrator passes props down
+          to children rather than children subscribing directly.
+          Core models are plain data; the store provides typed
+          getters/setters with change notification.
         '''
         technology 'TypeScript'
       }
@@ -99,11 +101,11 @@ model {
       selectionModel = component 'Selection Model' {
         #core
         description '''
-          Holds the current selection state: single tile GID,
-          multi-tile stamp (startGID, width, height from tileset
-          drag-select), or map region selection (rectangular area
-          of cells for copy/cut/move). The brush tool reads from
-          this to know what to paint.
+          Holds the current selection state. Currently supports
+          single tile GID selection for brush painting. The brush
+          tool reads from this to know what to paint.
+          Planned extensions: multi-tile stamp (M6), map region
+          selection for copy/cut/move (M9).
         '''
         technology 'TypeScript'
       }
@@ -111,10 +113,11 @@ model {
       toolEngine = component 'Tool Engine' {
         #core
         description '''
-          Stateless tool strategies. Each tool (brush, eraser,
-          bucket fill, rectangle fill, selection, eyedropper)
-          receives (event, editorState, tilemapModel) and returns
-          a Command object. No internal state — active tool
+          Stateless tool strategies dispatched via a strategy
+          registry. Each tool receives (ToolEvent, EditorState,
+          TilemapModel) and returns a Command object for undo/redo.
+          Currently implements: brush. Planned: eraser, bucket
+          fill, eyedropper (M4). No internal state — active tool
           identity lives in Editor Store.
         '''
         technology 'TypeScript'
@@ -148,11 +151,13 @@ model {
       mapCanvas = component 'Map Canvas' {
         description '''
           Main viewport rendering the tilemap via HTML Canvas.
-          Handles pan, zoom, grid overlay, and tool interactions.
-          Uses viewport culling (only renders tiles within the
-          visible region) and dirty-region tracking to avoid full
-          re-renders. Composites visible layers with per-layer
-          opacity using offscreen canvases.
+          Handles pan (middle-click/Space+drag), zoom (scroll
+          wheel centered on cursor), grid overlay, and tool
+          interactions (click/drag painting). Uses viewport
+          culling (only renders tiles within the visible region).
+          Renders visible layers with per-layer opacity via
+          Canvas 2D API. Emits bs-paint, bs-viewport-change,
+          and bs-cell-hover events to the parent shell.
         '''
         technology 'Lit 3, Canvas API'
       }
@@ -208,57 +213,52 @@ model {
 
   // ── Relationships: Component Level ────────────────────────────────
 
-  // Editor Store — central reactive state
+  // Communication pattern: props down, events up.
+  // EditorShell (bs-editor-shell) orchestrates all components,
+  // passing props down and listening to events bubbling up.
+
+  // Editor Store — state container (data holder, not reactive hub yet)
   editorStore -> tilesetModel 'holds reference to'
   editorStore -> tilemapModel 'holds reference to'
   editorStore -> selectionModel 'holds reference to'
-  editorStore -> toolEngine 'provides state to'
 
   // Tilemap owns layers
   tilemapModel -> layerModel 'contains ordered stack of'
 
-  // Import flow
+  // Import flow (events up to shell, shell creates tileset)
   importDialog -> tileDetector 'posts image data to worker'
-  tileDetector -> tilesetModel 'creates tileset from detected grid'
-  importDialog -> tilesetModel 'creates tileset with manual size'
+  tileDetector -> importDialog 'returns ranked size candidates'
+  importDialog -> tilesetModel 'shell creates tileset on bs-import-confirm'
 
-  // Tileset panel
+  // Tileset panel (emits bs-tile-select, shell updates selection)
   tilesetPanel -> tilesetModel 'reads tile data from'
-  tilesetPanel -> selectionModel 'writes tile/stamp selection to'
+  tilesetPanel -> selectionModel 'shell updates on bs-tile-select'
 
-  // Map canvas rendering — subscribes to store for reactive updates
-  mapCanvas -> editorStore 'subscribes to state changes'
+  // Map canvas rendering (receives props from shell)
   mapCanvas -> tilemapModel 'reads map data from'
   mapCanvas -> layerModel 'reads visible layers from'
   mapCanvas -> tilesetModel 'reads tile images from'
 
-  // Tool interactions
-  toolbar -> editorStore 'sets active tool in'
+  // Tool interactions (canvas dispatches to engine, emits events up)
+  toolbar -> editorStore 'shell sets active tool on click'
   mapCanvas -> toolEngine 'dispatches pointer events to'
   toolEngine -> tilemapModel 'mutates map cells via'
-  toolEngine -> layerModel 'mutates layer properties via'
-  toolEngine -> historyManager 'records commands in'
   toolEngine -> selectionModel 'reads active selection from'
 
   // Layer management
   layerPanel -> layerModel 'manages layers via'
-  layerPanel -> editorStore 'sets active layer in'
-  layerPanel -> historyManager 'records layer commands in'
+  layerPanel -> editorStore 'shell sets active layer on selection'
 
-  // History
+  // History (planned M4)
+  toolEngine -> historyManager 'records commands in'
   toolbar -> historyManager 'triggers undo/redo in'
   historyManager -> tilemapModel 'restores map state in'
   historyManager -> layerModel 'restores layer state in'
+  layerPanel -> historyManager 'records layer commands in'
 
-  // Serialization
+  // Serialization (planned M7)
   toolbar -> serializer 'triggers save/export in'
   serializer -> tilemapModel 'serializes/deserializes'
   serializer -> tilesetModel 'serializes/deserializes'
   serializer -> layerModel 'serializes/deserializes'
-
-  // Reactive notifications — store emits, UI subscribes
-  editorStore -> mapCanvas 'emits state changes to'
-  editorStore -> tilesetPanel 'emits state changes to'
-  editorStore -> layerPanel 'emits state changes to'
-  editorStore -> toolbar 'emits state changes to'
 }

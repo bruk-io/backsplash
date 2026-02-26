@@ -8,8 +8,14 @@ export default defineConfig({
       enabled: true,
       provider: playwright(),
       instances: [
-        { browser: 'chromium' },
+        {
+          browser: 'chromium',
+          launch: {
+            args: ['--window-size=1280,720'],
+          },
+        },
       ],
+      viewport: { width: 1280, height: 720 },
     },
   },
 });

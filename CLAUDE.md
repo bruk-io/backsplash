@@ -17,15 +17,31 @@ Serve diagrams locally: `npm run arch`
 2. **Read relevant dynamic views** — Check `views.c4` for any dynamic views that describe the flow you're implementing. These are the spec for how components interact.
 3. **Read the GitHub issue** — Understand acceptance criteria before writing code. If the issue is vague, clarify it first.
 
-### Keeping C4 current
+### Keeping C4 current (CRITICAL)
 
-Update the architecture docs when:
+**The C4 model is the source of truth for how components interact. If the C4 and the code disagree, that's a bug — fix one or the other before moving on.**
+
+Update the architecture docs **in the same commit/PR** as the code change when:
 - Adding a new component — add it to `model.c4` with relationships
 - Changing how components interact — update relationship arrows in `model.c4`
 - Implementing a new user flow — add or update a dynamic view in `views.c4`
 - Renaming or removing a component — update all references
+- Implementing a component that was previously aspirational — update description to reflect actual behavior (not planned behavior)
 
-Do NOT update C4 for internal implementation details (private methods, local state). C4 captures the architectural level — components and their contracts.
+**After every milestone**, review the C4 model against the implementation:
+- Are component descriptions accurate to what the code actually does?
+- Do relationship arrows match real data/event flow?
+- Are there aspirational descriptions that should be marked as planned vs implemented?
+- Is the communication pattern correctly documented (events up, props down)?
+
+Do NOT update C4 for internal implementation details (private methods, local state, utility modules). C4 captures the architectural level — components and their contracts.
+
+### Architecture conventions
+
+- **Communication pattern:** Properties down, events up (`CustomEvent` with `bubbles: true`, `composed: true`). The EditorShell acts as orchestrator, mediating between child components.
+- **Event prefix:** All backsplash component events use the `bs-` prefix (e.g., `bs-paint`, `bs-tile-select`, `bs-import-confirm`).
+- **EditorStore:** Reactive state container extending `EventTarget`. Currently used as a data holder; shell passes props to children rather than children subscribing to store directly.
+- **Pure utility modules** (`viewport.ts`, `dirty-tracker.ts`, `gid.ts`) are internal implementation details — don't add them as C4 components.
 
 ### Demoability
 
