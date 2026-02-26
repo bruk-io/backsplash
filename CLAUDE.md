@@ -88,6 +88,7 @@ Dark theme is activated via `data-theme="dark"` on `<html>` (set in `index.html`
 ```
 src/
   components/     # Lit web components (bs-* prefix)
+  models/         # Pure TypeScript data models and utilities
   styles/         # Global CSS (reset, editor overrides)
   main.ts         # Entry point — component registration
 docs/
@@ -99,7 +100,44 @@ docs/
 - `npm run dev` — Start dev server (http://localhost:5173)
 - `npm run build` — Type-check then build (`tsc --noEmit && vite build`)
 - `npm run lint` — Type-check only
+- `npm test` — Run node unit tests (models, viewport math)
+- `npm run test:browser` — Run browser interaction tests (components)
 - `npm run arch` — Serve C4 architecture diagrams
+
+## Testing
+
+Two test layers, each with its own vitest config:
+
+### Node unit tests (`npm test`)
+
+- **Config:** `vitest.config.ts`
+- **Pattern:** `src/**/*.test.ts` (excludes `*.browser.test.ts`)
+- **What they cover:** Pure TypeScript models and utility functions — no DOM, no browser APIs
+- **Design principle:** Extract complex logic (coordinate math, data transformations, algorithms) into pure functions in `src/models/`. Unit test those functions directly. This covers the hardest-to-debug logic without needing a browser.
+
+Example: viewport culling range calculation, screen↔tile coordinate conversion, and zoom-centered-on-cursor math live in `src/models/viewport.ts` — not buried in the canvas component.
+
+### Browser interaction tests (`npm run test:browser`)
+
+- **Config:** `vitest.browser.config.ts`
+- **Pattern:** `src/**/*.browser.test.ts`
+- **Provider:** Playwright (chromium)
+- **What they cover:** Component event contracts, pointer interactions, DOM state changes — things that require a real browser and real DOM
+- **Design principle:** Test that components emit the right events, respond to pointer/keyboard input, and update DOM correctly. Don't test rendering pixels — that's what top-hat screenshots are for.
+
+### What goes where
+
+| Logic type | Where it lives | Test type |
+|---|---|---|
+| Coordinate math, algorithms, data transforms | `src/models/*.ts` (pure functions) | Node unit test (`*.test.ts`) |
+| Component event emission, pointer handling | `src/components/*.ts` | Browser test (`*.browser.test.ts`) |
+| Visual correctness (does it look right?) | N/A | Top-hat screenshots in PR |
+
+### Writing testable components
+
+1. **Extract the math** — If a component has non-trivial logic (viewport culling, flood fill, coordinate conversion), pull it into a pure function in `src/models/`. Unit test the function. The component becomes a thin wrapper.
+2. **Test contracts, not pixels** — Browser tests verify event emission and DOM state, not canvas pixel colors.
+3. **Keep browser tests fast** — Create minimal test fixtures (small tilemaps, simple tilesets). Avoid full app bootstrapping.
 
 ## Pull Requests (CRITICAL)
 
