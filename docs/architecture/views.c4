@@ -244,7 +244,7 @@ views {
     gamedev -> backsplash.editorApp.toolbar 'clicks undo (or Ctrl+Z)'
     backsplash.editorApp.toolbar -> backsplash.editorApp.historyManager 'shell calls history.undo(tilemap)'
     backsplash.editorApp.historyManager -> backsplash.editorApp.tilemapModel 'restores previous cell values from command'
-    backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile images for restored cells'
+    backsplash.editorApp.tilemapModel -> backsplash.editorApp.mapCanvas 'shell calls requestUpdate(), canvas re-renders via props'
   }
 
   // ── Flow 8: Save / Export (PLANNED — M7) ────────────────────
