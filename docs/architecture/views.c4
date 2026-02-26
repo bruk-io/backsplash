@@ -68,9 +68,9 @@ views {
     description '''
       Internal structure of the editor application. Core domain
       models (green) are pure TypeScript with no UI dependency.
-      The Editor Store (amber) is the reactive state hub. UI
-      components (blue) subscribe to the store and dispatch
-      mutations through the domain models.
+      The Editor Store (amber) holds state written by the shell.
+      UI components (blue) receive props from the shell and emit
+      events upward; the shell orchestrates all mutations.
     '''
 
     include *
@@ -169,9 +169,9 @@ views {
     gamedev -> backsplash.editorApp.importDialog 'confirms tile size'
     backsplash.editorApp.importDialog -> backsplash.editorApp.tilesetModel 'shell creates tileset on bs-import-confirm'
 
-    // Shell adds tileset to tilemap and triggers Lit re-render;
+    // Shell adds tileset to tilemap via tilemap.addTileset(tileset);
     // tilesetPanel receives updated tilesets via props
-    backsplash.editorApp.tilesetModel -> backsplash.editorApp.tilemapModel 'shell calls addTileset'
+    backsplash.editorApp.tilemapModel -> backsplash.editorApp.tilesetModel 'shell registers tileset via tilemap.addTileset'
     backsplash.editorApp.tilesetPanel -> backsplash.editorApp.tilesetModel 'reads updated tilesets via props'
   }
 
@@ -201,11 +201,12 @@ views {
     gamedev -> backsplash.editorApp.mapCanvas 'clicks/drags on map cell'
     backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches pointer event with cell coords and EditorState'
 
-    // Tool engine applies mutation
+    // Tool engine applies mutation (called inline by canvas)
     backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'writes GID to cell on active layer'
 
-    // Shell records stroke in history on pointer up
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'shell batches stroke edits into one command'
+    // Canvas emits bs-paint events; shell accumulates edits.
+    // On bs-paint-end (pointer up), shell pushes one PaintCommand to history.
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.historyManager 'shell batches stroke edits into one command on bs-paint-end'
 
     // Canvas re-renders
     backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile image for painted GID'
@@ -227,7 +228,7 @@ views {
     backsplash.editorApp.mapCanvas -> backsplash.editorApp.toolEngine 'dispatches pointer event with cell coords'
 
     backsplash.editorApp.toolEngine -> backsplash.editorApp.tilemapModel 'BFS flood fills contiguous cells with selected GID'
-    backsplash.editorApp.toolEngine -> backsplash.editorApp.historyManager 'shell pushes batch PaintCommand'
+    backsplash.editorApp.mapCanvas -> backsplash.editorApp.historyManager 'shell pushes batch PaintCommand on bs-paint-end'
 
     backsplash.editorApp.mapCanvas -> backsplash.editorApp.tilesetModel 'fetches tile images for filled region'
   }

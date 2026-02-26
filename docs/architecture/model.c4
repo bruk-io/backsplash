@@ -41,13 +41,15 @@ model {
         #core, #reactive
         description '''
           Reactive state container extending EventTarget. Holds
-          editor-wide state: active tool, active layer, selected
-          tile GID, tilemap reference, viewport pan/zoom. Dispatches
+          editor-wide state: active tool, active layer index,
+          selected tile GID, and tilemap reference. Dispatches
           'editor-state-change' CustomEvents when properties change.
           Currently the EditorShell orchestrator passes props down
-          to children rather than children subscribing directly.
-          Core models are plain data; the store provides typed
-          getters/setters with change notification.
+          to children rather than children subscribing directly —
+          the store is written to by the shell but not yet read
+          by child components. Viewport pan/zoom fields exist on
+          the store but are not currently written to; viewport
+          state lives inside MapCanvas.
         '''
         technology 'TypeScript'
       }
@@ -115,10 +117,11 @@ model {
         description '''
           Stateless tool strategies dispatched via a strategy
           registry. Each tool receives (ToolEvent, EditorState,
-          TilemapModel) and returns a Command object for undo/redo.
-          Implements: brush, eraser, bucket fill (BFS), eyedropper.
-          No internal state — active tool identity lives in
-          Editor Store.
+          TilemapModel) and returns a Command or null. Brush,
+          eraser, and fill return PaintCommands for undo/redo.
+          Eyedropper returns null and signals via a callback
+          (onEyedrop) in EditorState. Called inline by MapCanvas
+          which constructs EditorState from its own properties.
         '''
         technology 'TypeScript'
       }
@@ -130,8 +133,9 @@ model {
           (cell edits), AddLayerCommand, DeleteLayerCommand,
           ReorderLayerCommand, and RenameLayerCommand. Fixed-size
           stack bounded by both command count (100) and byte size
-          (10MB). Extends EventTarget, dispatches history-change
-          events for UI reactivity.
+          (10MB). Extends EventTarget and dispatches history-change
+          events (currently unused — shell calls requestUpdate()
+          directly after undo/redo operations).
         '''
         technology 'TypeScript'
       }
@@ -156,8 +160,10 @@ model {
           interactions (click/drag painting). Uses viewport
           culling (only renders tiles within the visible region).
           Renders visible layers with per-layer opacity via
-          Canvas 2D API. Emits bs-paint, bs-viewport-change,
-          and bs-cell-hover events to the parent shell.
+          Canvas 2D API. Calls ToolEngine dispatch() inline
+          and emits bs-paint, bs-paint-end, bs-eyedrop,
+          bs-viewport-change, and bs-cell-hover events to the
+          parent shell.
         '''
         technology 'Lit 3, Canvas API'
       }
@@ -188,10 +194,13 @@ model {
 
       toolbar = component 'Toolbar' {
         description '''
-          Tool selection (brush, eraser, fill, select, etc.),
-          undo/redo buttons, zoom controls, save/export triggers.
+          Rendered inline in EditorShell using bh-toolbar — not
+          a standalone component. Provides tool selection (brush,
+          eraser, fill, eyedropper), undo/redo buttons, and
+          save/export triggers. Tool state and keyboard shortcuts
+          (B/E/G/I, Ctrl+Z/Ctrl+Shift+Z) handled by the shell.
         '''
-        technology 'Lit 3'
+        technology 'Lit 3 (inline in EditorShell)'
       }
 
       importDialog = component 'Import Dialog' {
@@ -223,10 +232,8 @@ model {
   // EditorShell (bs-editor-shell) orchestrates all components,
   // passing props down and listening to events bubbling up.
 
-  // Editor Store — state container (data holder, not reactive hub yet)
-  editorStore -> tilesetModel 'holds reference to'
+  // Editor Store — state container (written by shell, not yet read by children)
   editorStore -> tilemapModel 'holds reference to'
-  editorStore -> selectionModel 'holds reference to'
 
   // Tilemap owns layers
   tilemapModel -> layerModel 'contains ordered stack of'
@@ -257,8 +264,9 @@ model {
   layerPanel -> layerModel 'displays layer stack from'
   layerPanel -> editorStore 'shell updates active layer on bs-layer-select'
 
-  // History — shell mediates between canvas/toolbar and HistoryManager
-  toolEngine -> historyManager 'shell pushes commands from completed strokes'
+  // History — shell mediates between canvas/toolbar and HistoryManager.
+  // Canvas emits bs-paint/bs-paint-end; shell accumulates edits and pushes to history.
+  mapCanvas -> historyManager 'shell pushes commands from completed strokes on bs-paint-end'
   toolbar -> historyManager 'shell triggers undo/redo on click or Ctrl+Z'
   historyManager -> tilemapModel 'restores previous cell values on undo/redo'
 

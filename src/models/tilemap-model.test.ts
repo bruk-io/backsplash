@@ -197,6 +197,25 @@ describe('TilemapModel — layer stack', () => {
     expect(map.layers[0].name).toBe('Layer 1');
   });
 
+  it('replaceLayer swaps the layer at the given index', () => {
+    const map = makeMap();
+    map.addLayer(createTileLayer('Layer 2', 10, 8));
+    const replacement = createTileLayer('Replaced', 10, 8);
+    map.replaceLayer(0, replacement);
+    expect(map.layers[0].name).toBe('Replaced');
+    expect(map.layers[1].name).toBe('Layer 2');
+    expect(map.layers).toHaveLength(2);
+  });
+
+  it('replaceLayer is a no-op for out-of-range index', () => {
+    const map = makeMap();
+    const replacement = createTileLayer('Nope', 10, 8);
+    map.replaceLayer(5, replacement);
+    map.replaceLayer(-1, replacement);
+    expect(map.layers).toHaveLength(1);
+    expect(map.layers[0].name).toBe('Layer 1');
+  });
+
   it('can add object layers to the stack', () => {
     const map = makeMap();
     map.addLayer(createObjectLayer('Objects'));
