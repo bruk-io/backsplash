@@ -3,6 +3,9 @@ import { customElement, state } from 'lit/decorators.js';
 import { BaseElement, BhIcon } from '@bruk-io/bh-01';
 import { TilemapModel } from '../models/tilemap-model.js';
 import { TilesetModel } from '../models/tileset-model.js';
+import { TileDetectorWrapper } from '../workers/tile-detector-wrapper.js';
+import type { TileSizeCandidate } from '../workers/tile-detector-wrapper.js';
+import type { ImportImageDetail, ImportConfirmDetail } from './bs-import-dialog.js';
 import type { ViewportChangeDetail, CellHoverDetail } from './bs-map-canvas.js';
 
 // Register editor icons
@@ -71,6 +74,11 @@ export class BsEditorShell extends BaseElement {
   @state() private _zoomPercent = 100;
   @state() private _cursorCol = 0;
   @state() private _cursorRow = 0;
+  @state() private _importDialogOpen = false;
+  @state() private _importCandidates: TileSizeCandidate[] = [];
+  @state() private _selectedGid = 0;
+
+  private _detector = new TileDetectorWrapper();
 
   private get _sidebarOpen() {
     return this._panel !== '';
@@ -81,61 +89,17 @@ export class BsEditorShell extends BaseElement {
     this._initDemoTilemap();
   }
 
-  /** Create a demo tilemap with colored-rectangle tiles to prove the rendering pipeline. */
+  /** Create a default empty tilemap so the canvas shows a grid on first load. */
   private _initDemoTilemap(): void {
     const tileSize = 32;
-    const cols = 4;
-    const rows = 4;
-    const imgW = cols * tileSize;
-    const imgH = rows * tileSize;
+    const mapWidth = 20;
+    const mapHeight = 15;
 
-    // Generate a colored-rectangle tileset via OffscreenCanvas
-    const offscreen = new OffscreenCanvas(imgW, imgH);
-    const ctx = offscreen.getContext('2d')!;
-    const colors = [
-      '#4a9eff', '#ff6b6b', '#51cf66', '#ffd43b',
-      '#cc5de8', '#ff922b', '#20c997', '#748ffc',
-      '#f06595', '#94d82d', '#fcc419', '#22b8cf',
-      '#845ef7', '#ff8787', '#69db7c', '#fab005',
-    ];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        ctx.fillStyle = colors[r * cols + c];
-        ctx.fillRect(c * tileSize, r * tileSize, tileSize, tileSize);
-      }
-    }
-
-    // Convert to ImageBitmap and create the tileset + tilemap
-    createImageBitmap(offscreen).then((bitmap) => {
-      const tileset = new TilesetModel({
-        name: 'Demo Tileset',
-        image: bitmap,
-        tileWidth: tileSize,
-        tileHeight: tileSize,
-        imageWidth: imgW,
-        imageHeight: imgH,
-        firstGid: 1,
-      });
-
-      const mapWidth = 20;
-      const mapHeight = 15;
-      const tilemap = new TilemapModel({
-        width: mapWidth,
-        height: mapHeight,
-        tileWidth: tileSize,
-        tileHeight: tileSize,
-      });
-      tilemap.addTileset(tileset);
-
-      // Fill with a checkerboard/pattern using available GIDs (1-16)
-      for (let row = 0; row < mapHeight; row++) {
-        for (let col = 0; col < mapWidth; col++) {
-          const gid = ((col + row) % 16) + 1;
-          tilemap.setCellGid(0, col, row, gid);
-        }
-      }
-
-      this._tilemap = tilemap;
+    this._tilemap = new TilemapModel({
+      width: mapWidth,
+      height: mapHeight,
+      tileWidth: tileSize,
+      tileHeight: tileSize,
     });
   }
 
@@ -230,6 +194,14 @@ export class BsEditorShell extends BaseElement {
         </bh-status-bar>
 
       </bh-app-shell>
+
+      <bs-import-dialog
+        ?open=${this._importDialogOpen}
+        .candidates=${this._importCandidates}
+        @bs-import-image=${this._onImportImage}
+        @bs-import-confirm=${this._onImportConfirm}
+        @bs-import-cancel=${this._onImportCancel}
+      ></bs-import-dialog>
     `;
   }
 
@@ -252,18 +224,90 @@ export class BsEditorShell extends BaseElement {
   }
 
   private _renderTilesetsPanel() {
+    const tileset = this._tilemap?.tilesets[0] ?? null;
     return html`
       <bh-sidebar-panel style="height:100%">
         <bh-panel-header slot="header" label="Tilesets">
-          <bh-button slot="end" variant="ghost" size="sm" icon-only label="Import Tileset">
+          <bh-button
+            slot="end"
+            variant="ghost"
+            size="sm"
+            icon-only
+            label="Import Tileset"
+            @click=${this._openImportDialog}
+          >
             <bh-icon slot="prefix" name="plus"></bh-icon>
           </bh-button>
         </bh-panel-header>
-        <bh-center intrinsic style="padding:var(--bh-spacing-4)">
-          <bh-text variant="small" style="color:var(--bh-color-text-tertiary)">No tilesets loaded</bh-text>
-        </bh-center>
+        ${tileset
+          ? html`<bs-tileset-panel
+              .tileset=${tileset}
+              .selectedGid=${this._selectedGid}
+              @bs-tile-select=${this._onTileSelect}
+            ></bs-tileset-panel>`
+          : html`<bh-center intrinsic>
+              <bh-stack gap="xs" align="center">
+                <bh-text variant="small" style="color:var(--bh-color-text-tertiary)">
+                  No tilesets
+                </bh-text>
+                <bh-text variant="small" style="color:var(--bh-color-text-muted)">
+                  Click + to import a tileset
+                </bh-text>
+              </bh-stack>
+            </bh-center>`
+        }
       </bh-sidebar-panel>
     `;
+  }
+
+  private _openImportDialog(): void {
+    this._importDialogOpen = true;
+  }
+
+  private async _onImportImage(e: CustomEvent<ImportImageDetail>): Promise<void> {
+    // Clone the ImageBitmap so the dialog keeps its copy for preview.
+    // The detect() method transfers the bitmap to the worker (it becomes neutered).
+    const clone = await createImageBitmap(e.detail.image);
+    const candidates = await this._detector.detect(clone);
+    this._importCandidates = candidates;
+  }
+
+  private _onImportConfirm(e: CustomEvent<ImportConfirmDetail>): void {
+    const { image, name, tileWidth, tileHeight, margin, spacing } = e.detail;
+
+    // Determine firstGid — next available after existing tilesets
+    const tilesets = this._tilemap!.tilesets;
+    const firstGid = tilesets.length > 0
+      ? tilesets[tilesets.length - 1].lastGid + 1
+      : 1;
+
+    const tileset = new TilesetModel({
+      name,
+      image,
+      tileWidth,
+      tileHeight,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      margin,
+      spacing,
+      firstGid,
+    });
+
+    this._tilemap!.addTileset(tileset);
+    this._importDialogOpen = false;
+    this._importCandidates = [];
+
+    // Force reactive update since tilemap is mutated, not replaced
+    this.requestUpdate();
+  }
+
+  private _onImportCancel(): void {
+    this._importDialogOpen = false;
+    this._importCandidates = [];
+  }
+
+  private _onTileSelect(e: CustomEvent<{ gid: number }>): void {
+    this._selectedGid = e.detail.gid;
   }
 
   private _onActivity(e: CustomEvent<{ id: string }>) {
